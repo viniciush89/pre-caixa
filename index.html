@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Pré-Caixa</title>
+<meta name="description" content="Escaneie os produtos no mercado e saiba quanto a conta vai dar antes de chegar ao caixa.">
+<meta name="theme-color" content="#E4E8EA" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101316" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Pré-Caixa">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preload" href="fonts/sofia-sans-extra-condensed-latin-900-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header class="top" id="top">
+  <div class="top-in">
+    <div class="bar">
+      <h1 class="mark"><svg viewBox="0 0 34 23" aria-hidden="true"><path fill="currentColor" d="M0 0h3v23H0zM5 0h1v23H5zM8 0h2v23H8zM12 0h1v23h-1zM15 0h3v23h-3zM20 0h1v23h-1zM23 0h2v23h-2zM27 0h1v23h-1zM30 0h1v23h-1zM32 0h2v23h-2z"/></svg>Pré-Caixa</h1>
+      <span class="spacer"></span>
+      <button class="icon-btn" id="menuBtn" type="button" aria-label="Opções: mercado, orçamento, histórico e dados"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="2.1" fill="currentColor"/><circle cx="12" cy="12" r="2.1" fill="currentColor"/><circle cx="19" cy="12" r="2.1" fill="currentColor"/></svg></button>
+    </div>
+    <div class="tag" id="tag">
+      <div class="tag-head" aria-hidden="true"><span>Total no carrinho</span><span id="tagCount">0 itens</span></div>
+      <div class="tag-price" aria-hidden="true"><span class="cur">R$</span><span class="int" id="tagInt">0</span><span class="dec" id="tagDec">,00</span></div>
+      <span class="vh" id="tagSpoken" role="status">Total no carrinho: R$ 0,00</span>
+    </div>
+    <button class="budget" id="budgetBtn" type="button" data-state="none">
+      <span class="meter"><i id="meterFill"></i></span>
+      <span class="budget-row"><span id="budgetL">Sem orçamento</span><span id="budgetR">Definir limite</span></span>
+    </button>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="install" id="installBox" hidden>
+    <p id="installText"></p>
+    <div class="install-row"><button class="btn-mini" id="installBtn" type="button">Instalar</button><button class="btn-mini ghost" id="installLater" type="button">Agora não</button></div>
+  </div>
+  <p class="banner" id="storageWarn" hidden>Este navegador não está guardando os dados. Mantenha o app aberto até passar no caixa.</p>
+  <section class="receipt" aria-labelledby="rTitle">
+    <div class="r-head">
+      <h2 class="r-title" id="rTitle">Cupom de conferência</h2>
+      <button class="r-store" id="rStore" type="button">Informar mercado</button>
+      <span class="r-date" id="rDate"></span>
+    </div>
+    <div class="r-cols" id="rCols" aria-hidden="true" hidden>
+      <span>#</span><span class="c-desc">Descrição</span>
+      <span class="c-calc">Qtd un × vl unit</span><span class="c-sub">Vl item</span>
+    </div>
+    <ol class="lines" id="lines" aria-label="Itens no carrinho"></ol>
+    <div class="r-empty" id="rEmpty">
+      <div class="ghost" aria-hidden="true">
+        <div class="r-cols"><span>#</span><span class="c-desc">Descrição</span><span class="c-calc">Qtd un × vl unit</span><span class="c-sub">Vl item</span></div>
+        <div class="line"><span class="seq">001</span><span class="desc">Café torrado e moído 500g</span><span class="calc">1 un x 18,90</span><span class="sub">18,90</span></div>
+        <div class="line"><span class="seq">002</span><span class="desc">Banana prata</span><span class="calc">balança · 1 un x 6,37</span><span class="sub">6,37</span></div>
+      </div>
+      <p class="ghost-label">Exemplo · seus itens aparecem aqui</p>
+      <p class="r-help">Toque em <b>Escanear</b> e aponte a câmera para o código de barras. O nome do produto vem do catálogo e o preço que você confirmar fica salvo neste celular para a próxima vez.</p>
+    </div>
+    <div class="r-foot" id="rFoot" hidden>
+      <div class="row"><span>Qtd. total de itens</span><span id="footCount">0</span></div>
+      <div class="row total"><span>Valor total R$</span><span id="footTotal">0,00</span></div>
+    </div>
+    <p class="r-fine">Preço no caixa diferente da etiqueta? Vale o menor (Lei 10.962/2004, art. 5º)<br>Não é documento fiscal</p>
+  </section>
+</main>
+
+<nav class="dock" aria-label="Adicionar itens">
+  <div class="dock-in">
+    <button class="btn-scan" id="scanBtn" type="button"><svg viewBox="0 0 34 23" aria-hidden="true"><path fill="currentColor" d="M0 0h3v23H0zM5 0h1v23H5zM8 0h2v23H8zM12 0h1v23h-1zM15 0h3v23h-3zM20 0h1v23h-1zM23 0h2v23h-2zM27 0h1v23h-1zM30 0h1v23h-1zM32 0h2v23h-2z"/></svg>Escanear</button>
+    <button class="btn-type" id="typeBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M6.5 9.5h.01M10.2 9.5h.01M13.8 9.5h.01M17.5 9.5h.01M6.5 13h.01M17.5 13h.01M9 15.2h6"/></svg>Digitar</button>
+  </div>
+</nav>
+<input class="vh" type="file" id="cam" accept="image/*" capture="environment" tabindex="-1" aria-hidden="true">
+<input class="vh" type="file" id="importFile" accept="application/json,.json" tabindex="-1" aria-hidden="true">
+
+<section class="scanner" id="scanner" role="dialog" aria-modal="true" aria-label="Leitor de código de barras" hidden>
+  <video id="scanVideo" autoplay muted playsinline></video>
+  <div class="scan-ui">
+    <div class="scan-top">
+      <button class="scan-btn round" id="scanClose" type="button" aria-label="Fechar o leitor e ver o carrinho"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <div class="scan-total" id="scanTotal" aria-live="polite">R$ 0,00 · 0 itens</div>
+    </div>
+    <div class="scan-mid">
+      <div class="scan-frame" id="scanFrame"><i class="laser"></i></div>
+      <p class="scan-msg" id="scanMsg">Abrindo a câmera…</p>
+    </div>
+    <div class="scan-bottom">
+      <button class="scan-btn" id="scanTorch" type="button" aria-pressed="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3h8l-1.5 6h-5z"/><path d="M9.5 9h5v11a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1z"/><path d="M12 13v2.5"/></svg>Lanterna</button>
+      <button class="scan-btn" id="scanZoom" type="button" aria-pressed="false" hidden>2×</button>
+      <button class="scan-btn" id="scanType" type="button"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M6.5 9.5h.01M10.2 9.5h.01M13.8 9.5h.01M17.5 9.5h.01M6.5 13h.01M17.5 13h.01M9 15.2h6"/></svg>Digitar código</button>
+      <label class="scan-btn" id="scanPhoto" for="cam" role="button" tabindex="0"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.3l1.4-2h5.6l1.4 2h1.3A2.5 2.5 0 0 1 20 8.5v8a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12.4" r="3.4"/></svg>Foto</label>
+    </div>
+  </div>
+</section>
+
+<section class="panel" id="itemPanel" role="dialog" aria-modal="true" aria-labelledby="itemTitle" hidden>
+  <div class="p-bar"><div class="p-bar-in">
+    <button class="icon-btn" id="itemClose" type="button" aria-label="Cancelar"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <h2 class="p-title" id="itemTitle" tabindex="-1">Novo item</h2>
+    <button class="btn-mini" id="itemSave" type="button" disabled>Adicionar</button>
+  </div></div>
+  <div class="p-body"><div class="p-body-in">
+    <div class="scanrow">
+      <div class="thumb"><img id="thumbImg" alt="Foto do produto" hidden><span id="thumbIcon"><svg viewBox="0 0 34 23" aria-hidden="true"><path fill="currentColor" d="M0 0h3v23H0zM5 0h1v23H5zM8 0h2v23H8zM12 0h1v23h-1zM15 0h3v23h-3zM20 0h1v23h-1zM23 0h2v23h-2zM27 0h1v23h-1zM30 0h1v23h-1zM32 0h2v23h-2z"/></svg></span></div>
+      <div class="scaninfo">
+        <p class="status" id="scanStatus" data-kind="idle"><span class="dot" aria-hidden="true"></span><span id="scanStatusText"></span></p>
+        <p class="note" id="scanNote" aria-live="polite"></p>
+        <div class="busy-bar" id="busyBar" hidden><i></i></div>
+      </div>
+      <div class="scan-actions">
+        <label class="chip-btn" id="retake" for="cam" role="button" tabindex="0"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.3l1.4-2h5.6l1.4 2h1.3A2.5 2.5 0 0 1 20 8.5v8a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12.4" r="3.4"/></svg><span id="retakeText">Foto da etiqueta</span></label>
+        <button class="chip-btn" id="visionRead" type="button" hidden>Ler preço na foto</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-head">
+        <label for="priceInput" id="priceLabel">Preço</label>
+        <div class="seg" id="unitSeg" role="group" aria-label="Como é vendido"><button type="button" id="unitUn" aria-pressed="true">Unidade</button><button type="button" id="unitKg" aria-pressed="false">Por kg</button></div>
+      </div>
+      <div class="money"><span class="pre" aria-hidden="true">R$</span><input id="priceInput" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00"><span class="suf" id="perKg" hidden>/kg</span></div>
+      <p class="hint" id="priceHint" hidden><span id="priceHintText"></span><button type="button" id="priceHintUse">Usar esse</button></p>
+      <p class="obs" id="obs" hidden></p>
+    </div>
+
+    <div class="field" id="qtyField">
+      <label for="qtyInput">Quantidade</label>
+      <div class="stepper"><button type="button" id="qtyMinus" aria-label="Diminuir quantidade">−</button><input id="qtyInput" type="text" inputmode="numeric" autocomplete="off" value="1"><button type="button" id="qtyPlus" aria-label="Aumentar quantidade">+</button></div>
+    </div>
+
+    <div class="field" id="kgField" hidden>
+      <label for="gramsInput">Peso</label>
+      <div class="money"><input id="gramsInput" type="text" inputmode="numeric" autocomplete="off" placeholder="0,000"><span class="suf" aria-hidden="true">kg</span></div>
+      <div class="chips" id="kgChips"><button type="button" data-g="250">250 g</button><button type="button" data-g="500">500 g</button><button type="button" data-g="1000">1 kg</button><button type="button" data-g="1500">1,5 kg</button><button type="button" data-g="2000">2 kg</button></div>
+    </div>
+
+    <div class="field">
+      <label for="nameInput">Produto <span class="opt">opcional</span></label>
+      <input class="inp" id="nameInput" type="text" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" maxlength="80" placeholder="Ex.: Leite integral 1 L">
+    </div>
+
+    <div class="field">
+      <label for="codeInput">Código de barras <span class="opt">opcional</span></label>
+      <input class="inp mono" id="codeInput" type="text" inputmode="numeric" autocomplete="off" maxlength="32" placeholder="Lido pela câmera ou digitado">
+    </div>
+
+    <div class="sum" aria-live="polite">
+      <p class="line-calc" id="lineCalc"></p>
+      <p class="after" id="afterCalc"></p>
+    </div>
+    <button class="btn-primary" id="itemSubmit" type="button" disabled>Adicionar</button>
+    <button class="btn-danger" id="itemRemove" type="button" hidden>Remover do carrinho</button>
+  </div></div>
+</section>
+
+<section class="panel" id="menuPanel" role="dialog" aria-modal="true" aria-labelledby="menuTitle" hidden>
+  <div class="p-bar"><div class="p-bar-in">
+    <button class="icon-btn" id="menuClose" type="button" aria-label="Fechar"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <h2 class="p-title" id="menuTitle" tabindex="-1">Opções</h2>
+    <button class="btn-mini" id="menuInstall" type="button" hidden>Instalar app</button>
+  </div></div>
+  <div class="p-body"><div class="p-body-in">
+    <div class="group">
+      <div class="field">
+        <label for="storeInput">Mercado</label>
+        <input class="inp" id="storeInput" type="text" autocomplete="off" maxlength="40" enterkeyhint="done" placeholder="Ex.: Guanabara Méier">
+        <p class="help">Aparece no cupom e junto dos preços que você salvar.</p>
+      </div>
+      <div class="field">
+        <label for="budgetInput">Orçamento desta compra</label>
+        <div class="money"><span class="pre" aria-hidden="true">R$</span><input id="budgetInput" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00"><button type="button" class="btn-mini ghost" id="budgetClear">Sem limite</button></div>
+        <p class="help">A barra do topo fica amarela perto do limite e vermelha quando passa.</p>
+      </div>
+    </div>
+    <div class="group">
+      <label class="switch"><input type="checkbox" id="beepToggle"><span><b>Bip ao ler o código</b><small>O mesmo aviso do caixa, bem baixinho.</small></span></label>
+      <label class="switch"><input type="checkbox" id="catalogToggle"><span><b>Buscar o nome do produto</b><small>Consulta o código no catálogo aberto Open Food Facts quando o produto é novo. Precisa de internet.</small></span></label>
+    </div>
+    <div class="group">
+      <h3>Nova compra</h3>
+      <p class="help">Guarda esta compra no histórico e zera o carrinho.</p>
+      <button class="btn-wide" id="newTrip" type="button">Começar nova compra</button>
+      <div class="confirm" id="newConfirm" hidden>
+        <p id="newSummary"></p>
+        <div class="btn-pair"><button class="btn-wide strong" id="newYes" type="button">Guardar e zerar</button><button class="btn-wide" id="newNo" type="button">Cancelar</button></div>
+      </div>
+    </div>
+    <div class="group">
+      <h3>Compras anteriores</h3>
+      <p class="help" id="monthSum" hidden></p>
+      <ol class="hist" id="histList"></ol>
+      <p class="help" id="histEmpty">Nenhuma compra guardada ainda.</p>
+    </div>
+    <div class="group">
+      <h3>Seus dados</h3>
+      <p class="help" id="dataInfo"></p>
+      <div class="btn-pair"><button class="btn-wide" id="exportBtn" type="button">Exportar backup</button><button class="btn-wide" id="importBtn" type="button">Importar backup</button></div>
+      <div class="confirm" id="importConfirm" hidden>
+        <p id="importSummary"></p>
+        <div class="btn-pair"><button class="btn-wide strong" id="importYes" type="button">Substituir dados</button><button class="btn-wide" id="importNo" type="button">Cancelar</button></div>
+      </div>
+      <button class="btn-wide danger" id="memClear" type="button">Apagar preços salvos</button>
+      <div class="confirm" id="memConfirm" hidden>
+        <p>Apagar todos os preços e nomes guardados neste celular?</p>
+        <div class="btn-pair"><button class="btn-wide danger strong" id="memYes" type="button">Apagar</button><button class="btn-wide" id="memNo" type="button">Cancelar</button></div>
+      </div>
+    </div>
+    <div class="group">
+      <h3>Integrações</h3>
+      <p class="help">Opcional. Ligue o app ao sistema do mercado ou a um fluxo seu (n8n, por exemplo).</p>
+      <div class="field">
+        <label for="priceUrlInput">Consulta de preço (URL)</label>
+        <input class="inp mono" id="priceUrlInput" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://…">
+        <p class="help">Para cada código lido, o app chama <code>GET URL?ean=CÓDIGO&amp;mercado=NOME</code> e espera <code>{"nome": "...", "preco": 9.49}</code>.</p>
+      </div>
+      <div class="field">
+        <label for="visionUrlInput">Leitura de etiqueta por foto (URL)</label>
+        <input class="inp mono" id="visionUrlInput" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://…">
+        <p class="help">Recebe a foto por <code>POST</code> (campo <code>foto</code>, mais <code>ean</code> e <code>mercado</code>) e devolve <code>{"nome", "preco", "preco_por_kg"}</code>.</p>
+      </div>
+      <p class="help" id="integrationMsg" hidden></p>
+    </div>
+  </div></div>
+</section>
+
+<div class="toast" id="toast" hidden><p id="toastMsg" role="status"></p><button type="button" id="toastUndo" hidden>Desfazer</button></div>
+
+<script src="vendor/zxing-library-0.21.3.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
