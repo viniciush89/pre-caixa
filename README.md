@@ -24,8 +24,20 @@ Você aponta a câmera para o código de barras, confere preço e quantidade, e 
   - você digita uma vez e o celular lembra na próxima compra, inclusive item sem código (pão, frutas, frios), guardado pelo nome;
   - etiqueta de balança (EAN-13 começando com `2`) já traz o total no código.
 - **Lista de compras**: você monta em casa (aceita "2 leite", "leite x2", "café (2)"); sugere os produtos que você mais
-  compra. No mercado, cada produto que entra no carrinho risca o item da lista sozinho (pelo código ou pelo nome), e o
-  app mostra a previsão de quanto a compra vai fechar com o que falta. Na compra nova, os itens já pegos saem da lista.
+  compra. No mercado, o app mostra a previsão de quanto a compra vai fechar com o que falta. Na compra nova, os itens
+  já pegos saem da lista.
+- **Risca a lista sozinho**: cada produto que entra no carrinho (escaneado, digitado ou editado) risca o item da lista
+  que ele é. Sem IA:
+  - compara sem plural e feminino (pães = pão, moída = moído) e sem as palavras pequenas ("farinha de trigo" =
+    "Farinha Trigo");
+  - entende sinônimos (sabão em pó = lava roupas, detergente = lava louças, bolacha = biscoito, pasta de dente =
+    creme dental) e tipos (refrigerante → Coca, Guaraná; queijo → mussarela; carne → patinho; frutas → banana);
+  - não confunde produto feito do ingrediente: "leite" não é riscado por creme de leite ou leite condensado, "tomate"
+    por molho de tomate, "laranja" por suco de laranja;
+  - na tela do item aparece "Vai riscar da lista: …" antes de adicionar, com os outros itens para trocar ou desmarcar;
+  - **aprende com você**: se não reconheceu, marque o item na lista e toque em "Foi um destes?" no produto certo, ou
+    escolha o item na tela do item. Se riscou errado, desmarque e toque em "Não era esse". Da próxima vez ele acerta.
+  - item posto na lista com o produto já no carrinho é riscado na hora.
 - **Lista pelo WhatsApp**:
   - **WhatsApp** manda o que falta comprar ("• 3 leite"); **Compartilhar** (ou **Copiar**) usa outro app.
   - **Colar lista** traz o texto copiado de uma conversa. Aceita um item por linha ou separado por vírgula, e limpa

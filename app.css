@@ -401,6 +401,9 @@ button.line:active{background:var(--press)}
 .np-note{margin:2px 0 0;font-size:13.5px;line-height:1.4;color:var(--ink-2)}
 .np-foot .btn-mini{justify-self:start;margin-top:8px}
 
+.np-pair{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:7px}
+.np-pair-label{width:100%;font-size:12.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-2)}
+.np-pair-btn{min-height:36px;padding:6px 11px;font-size:14px}
 .np-tools{display:flex;flex-wrap:wrap;gap:6px;padding:0 12px 12px 56px}
 .np-tool{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 12px;border:1.5px solid var(--rule);border-radius:999px;background:transparent;color:var(--ink);font-weight:700;font-size:14.5px}
 .np-tool svg{width:18px;height:18px}

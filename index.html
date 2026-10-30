@@ -16,7 +16,7 @@
 <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="preload" href="fonts/sofia-sans-extra-condensed-latin-900-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="app.css?v=1.4.0">
+<link rel="stylesheet" href="app.css?v=1.5.0">
 </head>
 <body>
 
@@ -222,6 +222,12 @@
       <div class="name-sugg" id="nameSugg" hidden></div>
     </div>
 
+    <div class="field" id="listPick" hidden>
+      <span class="f-label" id="listPickLabel">Da sua lista</span>
+      <div class="chips" id="listPickChips" role="group" aria-labelledby="listPickLabel"></div>
+      <p class="help" id="listPickHelp" hidden></p>
+    </div>
+
     <div class="field">
       <label for="codeInput">Código de barras <span class="opt">opcional</span></label>
       <input class="inp mono" id="codeInput" type="text" inputmode="numeric" autocomplete="off" maxlength="32" placeholder="Lido pela câmera ou digitado">
@@ -355,6 +361,6 @@
 <div class="toast" id="toast" hidden><p id="toastMsg" role="status"></p><button type="button" id="toastUndo" hidden>Desfazer</button></div>
 
 <script src="vendor/zxing-wasm-reader-3.1.5.js"></script>
-<script src="app.js?v=1.4.0"></script>
+<script src="app.js?v=1.5.0"></script>
 </body>
 </html>

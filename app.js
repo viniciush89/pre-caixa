@@ -4,7 +4,7 @@
    - o que você mesmo ligar em Opções > Integrações. */
 (function () {
   'use strict';
-  var VERSION = '1.4.0';
+  var VERSION = '1.5.0';
   var $ = function (s) { return document.querySelector(s); };
   var reduceMotion = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 
@@ -70,14 +70,29 @@
       return o;
     }) : [];
   }
-  // Lista de compras: { id, text, qty, code, lineId (linha do carrinho que pegou o item), manual (marcado à mão) }
+  // Lista de compras: { id, text, qty, code, lineId (linha do carrinho que pegou o item), manual (marcado à mão),
+  //   ac (o código veio do produto que riscou o item, não de uma escolha da pessoa) }
   function cleanList(a) {
     return Array.isArray(a) ? a.filter(function (x) { return x && typeof x.text === 'string' && x.text.trim(); }).map(function (x) {
       return {
         id: String(x.id || uid()), text: x.text.trim().slice(0, 60), qty: Math.max(1, Math.min(99, Math.round(num(x.qty, 1)))),
-        code: typeof x.code === 'string' ? x.code : '', lineId: typeof x.lineId === 'string' ? x.lineId : '', manual: !!x.manual, at: num(x.at, Date.now())
+        code: typeof x.code === 'string' ? x.code : '', lineId: typeof x.lineId === 'string' ? x.lineId : '', manual: !!x.manual, at: num(x.at, Date.now()),
+        ac: !!x.ac
       };
     }).slice(0, 200) : [];
+  }
+  // O que a pessoa ensinou: item da lista (palavras) → produtos que valem (y) e que não valem (n).
+  function cleanLinks(o) {
+    var out = {};
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return out;
+    var keys = function (a) { return Array.isArray(a) ? a.filter(function (s) { return typeof s === 'string' && s; }).slice(0, 8) : []; };
+    Object.keys(o).slice(0, 600).forEach(function (k) {
+      var e = o[k];
+      if (!e || typeof e !== 'object') return;
+      var y = keys(e.y), n = keys(e.n);
+      if (y.length || n.length) out[k] = { y: y, n: n, t: num(e.t, 0) };
+    });
+    return out;
   }
 
   var settings = cleanSettings(readStore('settings', {}));
@@ -85,12 +100,15 @@
   var memory = cleanMemory(readStore('memory', {}));
   var history = cleanHistory(readStore('history', []));
   var list = cleanList(readStore('list', []));
+  var links = cleanLinks(readStore('links', {}));
 
+  var memVer = 0;
   function saveTrip() { writeStore('trip', trip); }
   function saveSettings() { writeStore('settings', settings); }
-  function saveMemory() { writeStore('memory', memory); }
+  function saveMemory() { memVer++; writeStore('memory', memory); }
   function saveHistory() { writeStore('history', history); }
   function saveList() { writeStore('list', list); }
+  function saveLinks() { writeStore('links', links); }
 
   var persisted = false;
   function checkPersist(ask) {
@@ -175,11 +193,113 @@
     var sh = a.length < b.length ? a : b, lo = a.length < b.length ? b : a;
     return sh.length >= 3 && lo.length - sh.length <= 2 && lo.indexOf(sh) === 0;
   }
-  // "leite" casa com "Leite Integral Piracanjuba 1L": toda palavra procurada aparece no nome.
+  /* ---------------- reconhecer o item da lista no nome do produto (sem IA) ----------------
+     "leite" casa com "Leite Integral Piracanjuba 1L": toda palavra do item aparece no nome do produto,
+     comparando sem plural/feminino (pães = pão, moída = moído), sem as palavras pequenas (de, em, com…),
+     com sinônimos (sabão em pó = lava roupas) e tipos (refrigerante → Coca, Guaraná…).
+     E não confunde produto feito do ingrediente: "leite" não risca creme de leite; "laranja" não risca suco. */
+  var STOP = {};
+  'de do da dos das em com sem para pra pro e o a os as ao aos no na nos nas um uma tipo'.split(' ').forEach(function (w) { STOP[w] = 1; });
+  function stem(w) {
+    if (/\d/.test(w)) return w;
+    if (w.length >= 4 && /[oa]es$/.test(w)) return w.slice(0, -3) + 'ao';
+    if (w.length >= 5 && /ais$/.test(w)) return w.slice(0, -3) + 'al';
+    if (w.length >= 5 && /eis$/.test(w)) return w.slice(0, -3) + 'el';
+    if (w.length >= 5 && /[rsz]es$/.test(w)) w = w.slice(0, -2);
+    else if (w.length >= 4 && /s$/.test(w)) w = w.slice(0, -1);
+    if (/ao$/.test(w)) return w;
+    if (w.length >= 5 && /[aeo]$/.test(w)) w = w.slice(0, -1);
+    return w;
+  }
+  var mwCache = {};
+  function mwords(s) {
+    s = String(s || '');
+    if (mwCache[s]) return mwCache[s];
+    var t = normText(s).replace(/(\d+)\s*(?:quilos?|kilos?|kgs)\b/g, '$1kg').replace(/(\d+)\s*(?:gramas?|grs?)\b/g, '$1g').replace(/(\d+)\s*(?:litros?|lts?)\b/g, '$1l');
+    return (mwCache[s] = t.split(' ').filter(function (w) { return w.length >= 2 && !STOP[w]; }).map(stem));
+  }
+  function phrases(s) { return s.split(',').map(function (p) { return mwords(p.trim()); }).filter(function (p) { return p.length; }); }
+  function wordSet(s) { var o = {}; phrases(s).forEach(function (p) { p.forEach(function (w) { o[w] = 1; }); }); return o; }
+  // Mesma coisa com outro nome (vale nos dois sentidos).
+  var SAME = [
+    'sabão em pó, lava roupas, lava roupa', 'sabão líquido, lava roupas líquido', 'detergente, lava louças, lava louça',
+    'papel higiênico, papel hig', 'creme dental, pasta de dente, pasta dental', 'escova de dente, escova dental',
+    'desodorante, antitranspirante', 'biscoito, bolacha', 'shampoo, xampu', 'iogurte, yogurte', 'água sanitária, cândida',
+    'mussarela, muçarela, muzzarela, mozarela, mozzarella', 'refrigerante, refri', 'papel toalha, toalha de papel',
+    'margarina, creme vegetal', 'cotonete, haste flexível', 'bombril, lã de aço', 'maisena, amido de milho', 'durex, fita adesiva'
+  ].map(phrases);
+  // Tipo de produto: a palavra da lista vale para qualquer um destes (só nesse sentido).
+  var KINDS = {};
+  [
+    ['refrigerante', 'coca, coca cola, guaraná, pepsi, fanta, sprite, sukita, kuat, tubaína, schweppes'],
+    ['macarrão', 'espaguete, spaghetti, penne, talharim, fusilli, miojo, lamen'],
+    ['queijo', 'mussarela, muçarela, muzzarela, mozarela, parmesão, coalho, provolone, gorgonzola, cottage, ricota, cheddar, gouda, brie'],
+    ['carne', 'patinho, acém, alcatra, picanha, maminha, músculo, contrafilé, fraldinha, costela, lagarto, cupim, coxão, filé mignon'],
+    ['peixe', 'tilápia, salmão, merluza, pescada, bacalhau, cação, robalo, dourado, corvina, linguado'],
+    ['frios', 'presunto, mortadela, salame, peito de peru, apresuntado, blanquet'],
+    ['pão', 'bisnaguinha, baguete, ciabatta, broa'],
+    ['achocolatado', 'nescau, toddy'],
+    ['biscoito', 'oreo, negresco, passatempo, trakinas, cookie'],
+    ['salgadinho', 'doritos, ruffles, cheetos, fandangos, baconzitos, pringles'],
+    ['fruta', 'banana, maçã, laranja, mamão, manga, uva, pera, abacaxi, melancia, melão, morango, limão, tangerina, mexerica, kiwi, goiaba, maracujá, abacate, caqui, ameixa, pêssego'],
+    ['verdura', 'alface, couve, rúcula, agrião, espinafre, repolho, brócolis, acelga, chicória, cheiro verde'],
+    ['legume', 'batata, cenoura, tomate, cebola, abobrinha, chuchu, beterraba, pepino, pimentão, abóbora, inhame, aipim, mandioca, berinjela, quiabo, vagem, jiló']
+  ].forEach(function (k) { KINDS[mwords(k[0])[0]] = phrases(k[1]); });
+  // Ingredientes e sabores: quando o produto começa por um destes tipos (suco, iogurte, molho…), o ingrediente sozinho não vale.
+  var INGR = wordSet('chocolate, baunilha, coco, leite, mel, alho, cebola, sal, galinha, frango, carne, queijo, milho, aveia, fubá, polvilho, menta, ' +
+    'hortelã, canela, café, açaí, amendoim, castanha, ervilha, presunto, bacon, calabresa, camarão, peixe, ovo, água, soja, arroz, feijão, ' +
+    'manteiga, hambúrguer, salsicha, gengibre, pimenta, cereja, framboesa');
+  KINDS.frut.concat(KINDS.legum).forEach(function (p) { p.forEach(function (w) { INGR[w] = 1; }); });
+  var HEADS = wordSet('suco, néctar, refresco, bebida, iogurte, sorvete, picolé, gelatina, geleia, bala, bolo, biscoito, bolacha, tempero, caldo, ' +
+    'pão, macarrão, molho, creme, doce, extrato, polpa, farinha, amido, óleo, leite, água, chá, cereal, sopa, mistura, massa, ' +
+    'manteiga, margarina, azeite, vinagre');
+  // Produto diferente com nome que começa pela palavra da lista: "leite" não é leite condensado; "água" não é água sanitária.
+  var COMPOUND = phrases('leite condensado, leite de coco, leite fermentado, água tônica, água sanitária, água oxigenada, água de coco, ' +
+    'pão de queijo, pão de alho, pão de mel, batata palha, farinha de rosca');
+  function hasAll(words, p) { return p.every(function (w) { return words.indexOf(w) >= 0; }); }
+  function blocked(v, n) {
+    for (var i = 0; i < COMPOUND.length; i++) {
+      var c = COMPOUND[i];
+      if (hasAll(n, c) && !hasAll(v, c) && c.some(function (w) { return v.indexOf(w) >= 0; })) return true;
+    }
+    // Ingrediente da lista que vem depois de um tipo de produto no nome ("Suco de Laranja", "Molho de Tomate").
+    var at = -1;
+    v.forEach(function (w) { var k = INGR[w] ? n.indexOf(w) : -1; if (k >= 0 && (at < 0 || k < at)) at = k; });
+    for (var j = 0; j < at; j++) if (HEADS[n[j]] && v.indexOf(n[j]) < 0) return true;
+    return false;
+  }
+  function indexOfSeq(q, p) {
+    for (var i = 0; i + p.length <= q.length; i++) {
+      var ok = true;
+      for (var j = 0; j < p.length && ok; j++) ok = q[i + j] === p[j];
+      if (ok) return i;
+    }
+    return -1;
+  }
+  var varCache = {};
+  function variants(q) {
+    var key = q.join(' ');
+    if (varCache[key]) return varCache[key];
+    var out = [q];
+    SAME.forEach(function (g) {
+      g.forEach(function (p) {
+        var i = indexOfSeq(q, p);
+        if (i < 0) return;
+        g.forEach(function (alt) { if (alt !== p) out.push(q.slice(0, i).concat(alt, q.slice(i + p.length))); });
+      });
+    });
+    q.forEach(function (w, i) { (KINDS[w] || []).forEach(function (alt) { out.push(q.slice(0, i).concat(alt, q.slice(i + 1))); }); });
+    return (varCache[key] = out);
+  }
   function nameMatches(query, name) {
-    var q = wordsOf(query), n = wordsOf(name);
-    if (!q.length || !n.length) return false;
-    return q.every(function (w) { return n.some(function (x) { return wordMatch(w, x); }); });
+    var q = mwords(query), n = mwords(name);
+    if (!q.length || !n.length || blocked(q, n)) return false;
+    return variants(q).some(function (v) { return hasAll(n, v) && !blocked(v, n); });
+  }
+  // Quantas palavras do item aparecem no nome (para pôr os mais parecidos primeiro).
+  function nameScore(query, name) {
+    var n = mwords(name);
+    return mwords(query).filter(function (w) { return n.indexOf(w) >= 0; }).length;
   }
   // Enquanto digita: a última palavra vale como começo ("caf" acha "Café").
   function typeMatches(query, name) {
@@ -823,7 +943,8 @@
       unit: 'un', unitUser: false, qty: 1, grams: 1000,
       kind: 'idle', status: '', note: '', memNote: '', obs: '',
       url: '', token: 0, priceFocused: false,
-      lookingCatalog: false, lookingApi: false, catalogResult: ''
+      lookingCatalog: false, lookingApi: false, catalogResult: '',
+      listPick: '', listCur: ''
     };
   }
   function setStatus(d, kind, status, note) { d.kind = kind; d.status = status; d.note = note || ''; }
@@ -883,6 +1004,7 @@
     ip.remove.hidden = d.mode !== 'edit';
     if (d.code || d.mode === 'edit' || !ip.name.value.trim()) ns.hidden = true;
     renderPriceHist(d);
+    renderListPick();
     renderCalc();
   }
 
@@ -959,6 +1081,8 @@
       name: l.name, nameTouched: true, price: l.price, priceTouched: true, priceFrom: 'digitado', unit: l.unit, unitUser: true,
       qty: l.qty, grams: l.grams
     });
+    var cur = list.filter(function (x) { return x.lineId === id; })[0];
+    draft.listPick = draft.listCur = cur ? cur.id : '';
     setStatus(draft, 'idle', 'Item ' + String(l.seq).padStart(3, '0'), 'Adicionado ' + whenText(l.at) + '.');
     fillInputs(); renderDraft();
     openPanel(ip.root, ip.title);
@@ -1004,7 +1128,7 @@
         if (stale()) return;
         d.lookingCatalog = false;
         d.catalogResult = n === null ? 'error' : n ? 'found' : 'missing';
-        if (n && !d.nameTouched && !d.name) setName(n, 'catalogo');
+        if (n && !d.nameTouched && (!d.name || d.nameFrom === 'lista')) setName(n, 'catalogo');
         afterLookup(d);
       });
     }
@@ -1154,8 +1278,20 @@
       flashId = l.id; msg = 'Item atualizado: ' + brl(lineTotal(l));
     }
     learn(d, name);
-    var crossed = line ? linkList(line) : null;
-    if (crossed) msg += ' · riscado da lista';
+    var crossed = null;
+    if (d.mode === 'new' && line) {
+      if (d.listPick === 'none') { var pred = findListItem(line, openListItems()); if (pred) learnLink(pred.text, prodKey(line), false); }
+      else if (d.listPick) crossed = linkTo(d.listPick, line);
+      else crossed = linkList(line);
+    } else if (d.mode === 'more' && line) crossed = linkList(line);
+    else if (d.mode === 'edit' && l) {
+      // Editar também risca: nome novo, ou item da lista escolhido na tela.
+      var cur = list.filter(function (x) { return x.lineId === l.id; })[0];
+      if (d.listPick === 'none') { if (cur) { unlinkItem(cur); learnLink(cur.text, prodKey(l), false); saveList(); } }
+      else if (d.listPick && (!cur || cur.id !== d.listPick)) crossed = linkTo(d.listPick, l);
+      else if (!cur) crossed = linkList(l);
+    }
+    if (crossed) msg += ' · ' + crossedText(crossed);
     saveTrip();
     if (!askedPersist) { askedPersist = true; checkPersist(true); }
     closePanel();
@@ -1220,7 +1356,7 @@
   }
   ip.unitUn.addEventListener('click', function () { setUnit('un'); });
   ip.unitKg.addEventListener('click', function () { setUnit('kg'); });
-  ip.name.addEventListener('input', function () { if (!draft) return; draft.name = ip.name.value.slice(0, 80); draft.nameTouched = true; draft.nameFrom = 'digitado'; renderNameSugg(); renderPriceHist(draft); });
+  ip.name.addEventListener('input', function () { if (!draft) return; draft.name = ip.name.value.slice(0, 80); draft.nameTouched = true; draft.nameFrom = 'digitado'; renderNameSugg(); renderPriceHist(draft); renderListPick(); });
   ip.name.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); ip.name.blur(); } });
   function typedCode(finished) {
     if (!draft) return;
@@ -1649,7 +1785,7 @@
     var info = (more ? line.qty + ' no carrinho · ' : '') + brl(line.price);
     if (f.m && f.m.s && settings.store && !sameStore(f.m.s, settings.store)) info += ' · preço do ' + f.m.s + ', confira';
     else if (f.m && Date.now() - (f.m.t || 0) > 30 * 864e5) info += ' · preço de ' + ddmm(f.m.t) + ', confira';
-    if (crossed) info += ' · riscado da lista';
+    if (crossed) info += ' · ' + crossedText(crossed);
     fast.before = before; fast.lineId = line.id; fast.mode = 'added';
     fast.undo.textContent = 'Desfazer';
     fast.name.textContent = displayName(line);
@@ -1681,7 +1817,8 @@
       saveTrip(); renderAll(line.id, true, true);
       fast.before = before; fast.mode = 'added';
       fast.undo.textContent = 'Desfazer';
-      fast.info.textContent = line.qty + ' no carrinho · ' + brl(line.price) + ' cada';
+      var li = list.filter(function (x) { return x.lineId === line.id; })[0];
+      fast.info.textContent = line.qty + ' no carrinho · ' + brl(line.price) + ' cada' + (li ? ' · ' + crossedText(li) : '');
       clearTimeout(fast.timer); fast.timer = setTimeout(hideFast, 6000);
       return;
     }
@@ -1751,15 +1888,48 @@
   var CHECK_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 12.5l4 4L18.5 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   var DEL_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg>';
 
-  // Preço de referência de um item da lista: pelo código, ou o produto salvo mais recente com o mesmo nome.
+  /* O app aprende: quando a pessoa liga um item da lista a um produto (ou diz "não era esse"), guarda para a próxima vez. */
+  function listKey(text) { return mwords(text).join(' '); }
+  // Identidade do produto: código de barras, etiqueta de balança (sem o preço) ou nome, para item sem código.
+  function prodKey(l) { var sc = l.scale && scaleOf(l.code || ''); return sc ? sc.key : memKey(l.code, l.name); }
+  function taught(text, pk) {
+    var e = pk && links[listKey(text)];
+    return !e ? 0 : e.y.indexOf(pk) >= 0 ? 1 : e.n.indexOf(pk) >= 0 ? -1 : 0;
+  }
+  function learnLink(text, pk, ok) {
+    var k = listKey(text);
+    if (!k || !pk) return;
+    var e = links[k] || (links[k] = { y: [], n: [], t: 0 });
+    var add = ok ? e.y : e.n, rem = ok ? e.n : e.y, i = rem.indexOf(pk);
+    if (i >= 0) rem.splice(i, 1);
+    i = add.indexOf(pk);
+    if (i >= 0) add.splice(i, 1);
+    add.unshift(pk); add.splice(8);
+    e.t = Date.now();
+    var ks = Object.keys(links);
+    if (ks.length > 500) {
+      ks.sort(function (a, b) { return links[a].t - links[b].t; });
+      ks.slice(0, ks.length - 500).forEach(function (x) { delete links[x]; });
+    }
+    saveLinks(); memCache = {};
+  }
+
+  // Preço de referência de um item da lista: pelo código, pelo produto ensinado, ou o salvo mais recente com o mesmo nome.
+  var memCache = {};
   function memFor(it) {
     if (it.code && memory[it.code] && memory[it.code].p > 0) return memory[it.code];
-    var best = null;
-    for (var k in memory) {
-      var m = memory[k];
-      if (!m || !(m.p > 0) || !m.n || k.indexOf('balanca:') === 0) continue;
-      if ((!best || (m.t || 0) > (best.t || 0)) && nameMatches(it.text, m.n)) best = m;
+    var ck = it.text + '|' + it.code, c = memCache[ck];
+    if (c && c.v === memVer) return c.m;
+    var e = links[listKey(it.text)], best = null;
+    if (e) for (var i = 0; i < e.y.length && !best; i++) { var t = memory[e.y[i]]; if (t && t.p > 0) best = t; }
+    if (!best) {
+      for (var k in memory) {
+        var m = memory[k];
+        if (!m || !(m.p > 0) || !m.n || k.indexOf('balanca:') === 0) continue;
+        if ((!best || (m.t || 0) > (best.t || 0)) && (!e || e.n.indexOf(k) < 0) && nameMatches(it.text, m.n)) best = m;
+      }
     }
+    memCache[ck] = { v: memVer, m: best };
     return best;
   }
   function unitEstimate(m) { return m.u === 'kg' ? Math.round(m.p * (m.g || 1000) / 1000) : m.p; }
@@ -1786,18 +1956,54 @@
     return s;
   }
 
-  // Item que acabou de entrar no carrinho risca o primeiro item da lista que bate: pelo código, depois pelo nome.
+  // Qual item da lista este produto risca: pelo código, pelo que a pessoa ensinou, depois pelo nome
+  // (o nome mais completo ganha: "leite integral" antes de "leite"). Nunca o que a pessoa disse que não era.
+  function findListItem(line, items) {
+    var pk = prodKey(line), lk = memKey(line.code, line.name), best = null, score = 0;
+    items.forEach(function (it) {
+      var t = taught(it.text, pk), s = 0;
+      if (t < 0) return;
+      if (it.code && (it.code === lk || it.code === pk)) s = 3;
+      else if (t > 0) s = 2;
+      else if (line.name && nameMatches(it.text, line.name)) s = 1 + mwords(it.text).length / 100;
+      if (s > score) { best = it; score = s; }
+    });
+    return best;
+  }
+  function openListItems() { return listRows().filter(function (r) { return !r.done && !r.line; }).map(function (r) { return r.it; }); }
+  // Item que acabou de entrar no carrinho risca o item da lista que bate.
   function linkList(line) {
     if (!list.length || list.some(function (it) { return it.lineId === line.id; })) return null;
-    var rows = listRows(), open = rows.filter(function (r) { return !r.done && !r.line; }).map(function (r) { return r.it; });
-    var lk = memKey(line.code, line.name);
-    var hit = (lk && open.filter(function (it) { return it.code && it.code === lk; })[0]) ||
-      open.filter(function (it) { return nameMatches(it.text, line.name || ''); })[0];
+    var hit = findListItem(line, openListItems());
     if (!hit) return null;
-    hit.lineId = line.id;
-    if (!hit.code && line.code) hit.code = line.code;
+    hit.lineId = line.id; hit.manual = false;
+    if (!hit.code) { hit.code = prodKey(line); hit.ac = true; }
     saveList();
     return hit;
+  }
+  // Ligação escolhida pela pessoa (na tela do item ou em "Foi um destes?"): liga e aprende.
+  function linkTo(itemId, line) {
+    var it = list.filter(function (x) { return x.id === itemId; })[0];
+    if (!it) return null;
+    list.forEach(function (x) { if (x !== it && x.lineId === line.id) x.lineId = ''; });
+    it.lineId = line.id; it.manual = false;
+    var pk = prodKey(line);
+    if (!it.code || it.ac) { it.code = pk; it.ac = true; }
+    learnLink(it.text, pk, true);
+    saveList();
+    return it;
+  }
+  function unlinkItem(it) {
+    it.lineId = '';
+    if (it.ac) { it.code = ''; it.ac = false; }
+  }
+  // Para os avisos: 'riscou “café” da lista' ou '“leite”: 1 de 2 da lista' (sem repetir o nome quando é o mesmo do produto).
+  function sameName(it, line) { return !!(line && line.name) && normText(it.text) === normText(line.name); }
+  function crossedText(it) {
+    var r = listRows().filter(function (x) { return x.it === it; })[0];
+    if (!r) return '';
+    var what = sameName(it, r.line) ? '' : '“' + it.text + '” ';
+    return r.done ? (what ? 'riscou ' + what + 'da lista' : 'riscado da lista') : (what ? what.trim() + ': ' : '') + r.got + ' de ' + it.qty + ' da lista';
   }
 
   // "2 leite", "2x leite", "3 un leite"; no fim, "leite x2", "leite 2x", "leite (2)". "1 kg de feijão" é peso, não quantidade.
@@ -1858,6 +2064,15 @@
     });
   }
 
+  // Produtos do carrinho que ainda não riscaram nada da lista, os mais parecidos com o item primeiro.
+  function freeLines(text) {
+    var used = {};
+    list.forEach(function (x) { if (x.lineId) used[x.lineId] = 1; });
+    return trip.cart.filter(function (l) { return !used[l.id] && taught(text, prodKey(l)) >= 0; })
+      .map(function (l, i) { return { l: l, s: nameScore(text, l.name || ''), i: i }; })
+      .sort(function (a, b) { return (b.s - a.s) || (a.i - b.i); })
+      .slice(0, 3).map(function (x) { return x.l; });
+  }
   function listRow(r) {
     var it = r.it, li = document.createElement('li');
     li.className = 'np-row' + (r.done ? ' done' : r.got ? ' part' : '');
@@ -1867,14 +2082,29 @@
     chk.setAttribute('aria-pressed', String(r.done));
     chk.setAttribute('aria-label', (r.done ? 'Desmarcar ' : 'Marcar como pego: ') + it.text);
     var sub;
-    if (r.done && r.line) sub = 'No carrinho · ' + brl(lineTotal(r.line));
+    if (r.done && r.line) sub = 'No carrinho' + (sameName(it, r.line) ? '' : ': ' + displayName(r.line)) + ' · ' + brl(lineTotal(r.line));
     else if (r.done) sub = 'Marcado à mão';
-    else if (r.got) sub = r.got + ' de ' + it.qty + ' no carrinho' + (r.each != null ? ' · falta ≈ ' + brl(r.each * r.rest) : '');
+    else if (r.got) sub = r.got + ' de ' + it.qty + ' no carrinho' + (sameName(it, r.line) ? '' : ' (' + displayName(r.line) + ')') + (r.each != null ? ' · falta ≈ ' + brl(r.each * r.rest) : '');
     else if (r.each != null) sub = '≈ ' + brl(r.each) + (it.qty > 1 ? ' cada' : '') + (r.m.u === 'kg' ? ' (' + kg(r.m.g || 1000) + ' kg)' : '') + ' · ' + (r.m.s ? r.m.s + ', ' : '') + ddmm(r.m.t);
     else sub = 'Sem preço salvo ainda';
     var txt = document.createElement('div');
     txt.className = 'np-text';
     txt.append(span('np-name', (it.qty > 1 ? it.qty + ' × ' : '') + it.text), span('np-sub', sub));
+    // Marcado à mão com produtos soltos no carrinho: "Foi um destes?" ensina o app.
+    var fl = r.done && it.manual && !r.line ? freeLines(it.text) : [];
+    if (fl.length) {
+      var pair = document.createElement('div');
+      pair.className = 'np-pair';
+      pair.appendChild(span('np-pair-label', 'Foi um destes?'));
+      fl.forEach(function (l) {
+        var pb = document.createElement('button');
+        pb.type = 'button'; pb.className = 'np-chip np-pair-btn'; pb.dataset.act = 'pair'; pb.dataset.line = l.id;
+        pb.textContent = displayName(l);
+        pb.setAttribute('aria-label', '“' + it.text + '” foi ' + displayName(l));
+        pair.appendChild(pb);
+      });
+      txt.appendChild(pair);
+    }
     var del = document.createElement('button');
     del.type = 'button'; del.className = 'np-del'; del.dataset.act = 'del'; del.innerHTML = DEL_SVG;
     del.setAttribute('aria-label', 'Tirar da lista: ' + it.text);
@@ -1935,18 +2165,27 @@
     var raw = lv.input.value.trim();
     if (!raw) return;
     var p = parseListText(raw);
-    addToList(p.text, '', p.qty);
+    var it = addToList(p.text, '', p.qty);
     lv.input.value = '';
+    alreadyInCart(it);
     renderList();
     try { lv.input.focus(); } catch (x) {}
   });
+  // Item posto na lista com o produto já no carrinho: risca na hora.
+  function alreadyInCart(it) {
+    if (!it || it.lineId) return;
+    trip.cart.forEach(linkList);
+    var line = it.lineId && lineById(it.lineId);
+    if (line) toast('“' + it.text + '” já está no carrinho: ' + displayName(line) + '.');
+  }
   lv.input.addEventListener('input', renderSugg);
   lv.sugg.addEventListener('click', function (e) {
     var b = e.target.closest('button[data-code]');
     if (!b || !memory[b.dataset.code]) return;
     var raw = lv.input.value.trim(), qty = /^\d/.test(raw) ? parseListText(raw).qty : 1;
-    addToList(memory[b.dataset.code].n, b.dataset.code, qty);
+    var it = addToList(memory[b.dataset.code].n, b.dataset.code, qty);
     lv.input.value = '';
+    alreadyInCart(it);
     renderList();
   });
   lv.items.addEventListener('click', function (e) {
@@ -1960,8 +2199,26 @@
       toast('Tirado da lista: ' + it.text, function () { list = before; saveList(); renderList(); });
       return;
     }
-    var inCart = it.lineId && trip.cart.some(function (l) { return l.id === it.lineId; });
-    if (it.manual || inCart) { it.manual = false; it.lineId = ''; } else it.manual = true;
+    if (b.dataset.act === 'pair') {
+      var pl = lineById(b.dataset.line);
+      if (!pl) return;
+      var wasManual = it.manual;
+      linkTo(it.id, pl); it.manual = wasManual; saveList(); renderList();
+      toast('Pronto: “' + it.text + '” é ' + displayName(pl) + '. Da próxima vez o app risca sozinho.');
+      return;
+    }
+    var r = listRows().filter(function (x) { return x.it === it; })[0];
+    if (!r.done) it.manual = true;                 // pendente ou "1 de 2": marca como pego
+    else if (it.manual) it.manual = false;         // desmarca o que foi marcado à mão
+    else if (r.line) {                             // riscado por um produto: desfaz; se foi engano, o app aprende
+      var wrong = r.line, pk = prodKey(wrong), text = it.text;
+      unlinkItem(it); saveList(); renderList();
+      toast('“' + text + '” desmarcado.', function () {
+        learnLink(text, pk, false);
+        toast('Certo: “' + text + '” não vai mais ser riscado por ' + displayName(wrong) + '.');
+      }, 'Não era esse');
+      return;
+    }
     saveList(); renderList();
   });
   lv.clear.addEventListener('click', function () {
@@ -2392,6 +2649,56 @@
   window.addEventListener('online', function () { setTimeout(fillMissingNames, 1200); });
   document.addEventListener('visibilitychange', function () { if (!document.hidden) setTimeout(fillMissingNames, 600); });
 
+  /* ---------------- tela do item: qual item da lista este produto risca ---------------- */
+  var lp = { root: $('#listPick'), label: $('#listPickLabel'), chips: $('#listPickChips'), help: $('#listPickHelp') };
+  function draftLine(d) { return { id: d.lineId || '', code: d.code, name: (d.name || '').trim(), scale: !!d.scale }; }
+  // Itens que este produto pode riscar; ao editar, o item que ele já riscou também aparece.
+  function pickItems(d) {
+    var items = openListItems();
+    var cur = d.listCur && list.filter(function (x) { return x.id === d.listCur; })[0];
+    if (cur && items.indexOf(cur) < 0) items.unshift(cur);
+    return items;
+  }
+  function pickedItem(d) {
+    if (d.listPick === 'none') return null;
+    if (d.listPick) return list.filter(function (x) { return x.id === d.listPick; })[0] || null;
+    return findListItem(draftLine(d), pickItems(d));
+  }
+  function renderListPick() {
+    var d = draft, items = d && (d.mode === 'new' || d.mode === 'edit') ? pickItems(d) : [];
+    lp.root.hidden = !items.length;
+    if (!items.length) return;
+    var sel = pickedItem(d), name = (d.name || '').trim();
+    var order = items.map(function (it, i) { return { it: it, s: it === sel ? 1e3 : nameScore(it.text, name), i: i }; })
+      .sort(function (a, b) { return (b.s - a.s) || (a.i - b.i); }).slice(0, 8);
+    lp.label.textContent = sel ? 'Vai riscar da lista' : 'Riscar algum item da lista?';
+    lp.chips.textContent = '';
+    order.forEach(function (o) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.dataset.id = o.it.id;
+      b.textContent = (o.it.qty > 1 ? o.it.qty + ' × ' : '') + o.it.text;
+      b.setAttribute('aria-pressed', String(o.it === sel));
+      lp.chips.appendChild(b);
+    });
+    lp.help.hidden = !sel;
+    if (sel) lp.help.textContent = d.listCur && sel.id === d.listCur ? 'Este produto riscou este item. Toque nele para desfazer.'
+      : d.listPick ? 'Escolhido por você. Toque de novo para não riscar.'
+      : 'O app reconheceu. Toque em outro item para trocar, ou neste para não riscar.';
+  }
+  lp.chips.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-id]'), d = draft;
+    if (!b || !d) return;
+    var sel = pickedItem(d);
+    if (sel && sel.id === b.dataset.id) d.listPick = 'none';
+    else {
+      d.listPick = b.dataset.id;
+      var it = list.filter(function (x) { return x.id === b.dataset.id; })[0];
+      // Produto sem nome: fica com o nome do item da lista (o catálogo ainda pode trocar por um nome melhor).
+      if (it && !(d.name || '').trim() && !d.nameTouched) { setName(it.text.charAt(0).toUpperCase() + it.text.slice(1), 'lista'); renderPriceHist(d); }
+    }
+    renderListPick();
+  });
+
   /* ---------------- nome de item sem código: escolher um já comprado ---------------- */
   var ns = $('#nameSugg');
   function renderNameSugg() {
@@ -2542,7 +2849,7 @@
 
   // backup
   mp.exportBtn.addEventListener('click', function () {
-    var data = { app: 'pre-caixa', v: 2, exportedAt: new Date().toISOString(), settings: settings, trip: trip, memory: memory, history: history, list: list };
+    var data = { app: 'pre-caixa', v: 3, exportedAt: new Date().toISOString(), settings: settings, trip: trip, memory: memory, history: history, list: list, links: links };
     var name = 'pre-caixa-backup-' + new Date().toISOString().slice(0, 10) + '.json';
     var blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
     var file = null;
@@ -2577,8 +2884,9 @@
   mp.importYes.addEventListener('click', function () {
     var data = pendingImport; if (!data) return;
     settings = cleanSettings(data.settings); trip = cleanTrip(data.trip); memory = cleanMemory(data.memory); history = cleanHistory(data.history); list = cleanList(data.list);
+    links = cleanLinks(data.links); memCache = {};
     tab = settings.tab;
-    saveSettings(); saveTrip(); saveMemory(); saveHistory(); saveList();
+    saveSettings(); saveTrip(); saveMemory(); saveHistory(); saveList(); saveLinks();
     pendingImport = null; mp.importConfirm.hidden = true;
     fillMenu(); renderAll(null, true); toast('Backup restaurado.');
   });
