@@ -4,7 +4,7 @@
    - o que você mesmo ligar em Opções > Integrações. */
 (function () {
   'use strict';
-  var VERSION = '1.2.0';
+  var VERSION = '1.3.0';
   var $ = function (s) { return document.querySelector(s); };
   var reduceMotion = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 
@@ -22,7 +22,7 @@
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
   function num(v, d) { return typeof v === 'number' && isFinite(v) ? v : d; }
 
-  var DEFAULTS = { store: '', budget: null, beep: true, catalog: true, priceUrl: '', installDismissed: false, cameraId: '', zoom: 0, tab: 'cart' };
+  var DEFAULTS = { store: '', budget: null, beep: true, catalog: true, priceUrl: '', installDismissed: false, cameraId: '', zoom: 0, tab: 'cart', fast: true };
   function cleanSettings(s) {
     s = Object.assign({}, DEFAULTS, s && typeof s === 'object' ? s : {});
     if (typeof s.store !== 'string') s.store = '';
@@ -33,10 +33,11 @@
     if (typeof s.cameraId !== 'string') s.cameraId = '';
     s.zoom = num(s.zoom, 0); if (!(s.zoom >= 1 && s.zoom <= 3)) s.zoom = 0;
     if (s.tab !== 'list') s.tab = 'cart';
+    s.fast = s.fast !== false;
     return s;
   }
   function cleanTrip(t) {
-    var base = { cart: [], startedAt: Date.now(), seq: 0 };
+    var base = { cart: [], startedAt: Date.now(), seq: 0, setup: false };
     if (!t || typeof t !== 'object' || !Array.isArray(t.cart)) return base;
     var cart = t.cart.filter(function (l) { return l && typeof l === 'object' && num(l.price, -1) >= 0; }).map(function (l) {
       return {
@@ -49,7 +50,7 @@
     });
     var seq = Math.round(num(t.seq, 0));
     cart.forEach(function (l) { if (l.seq > seq) seq = l.seq; });
-    return { cart: cart, startedAt: num(t.startedAt, Date.now()), seq: seq };
+    return { cart: cart, startedAt: num(t.startedAt, Date.now()), seq: seq, setup: !!t.setup };
   }
   function cleanMemory(m) { return m && typeof m === 'object' && !Array.isArray(m) ? m : {}; }
   function cleanHistory(h) {
@@ -141,6 +142,8 @@
   }
   function flat(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, ''); }
   function sameStore(a, b) { return flat(a) === flat(b); }
+  // Chave do produto na memória: o código de barras ou, para item sem código, o nome.
+  function memKey(code, name) { var n = normText(name); return code || (n ? 'nome:' + n : ''); }
   function ddmm(ts) { var d = new Date(ts); return pad(d.getDate()) + '/' + pad(d.getMonth() + 1); }
   // Texto para comparar nomes: sem acento, minúsculo, número colado na unidade ("5 kg" vira "5kg").
   function normText(s) {
@@ -201,6 +204,14 @@
     var r = total / b;
     return r > 1 ? 'over' : r >= 0.9 ? 'close' : r >= 0.75 ? 'near' : 'ok';
   }
+  var mini = { root: $('#mini'), btn: $('#miniBtn'), total: $('#miniTotal'), info: $('#miniInfo') };
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function (es) {
+      var e = es[es.length - 1];
+      mini.root.classList.toggle('show', !e.isIntersecting && e.boundingClientRect.top < 0);
+    }, { threshold: 0 }).observe(el.tag);
+  }
+  mini.btn.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' }); });
   function renderTotals(bump, alert) {
     var total = cartTotal(trip.cart), n = trip.cart.length, b = settings.budget;
     var s = money(total), i = s.lastIndexOf(',');
@@ -231,6 +242,9 @@
       }
     }
     el.tagSpoken.textContent = spoken;
+    mini.root.dataset.level = lvl;
+    mini.total.textContent = brl(total);
+    mini.info.textContent = !b ? plural(n, 'item', 'itens') : total > b ? 'passou ' + brl(total - b) : 'faltam ' + brl(b - total);
     el.footCount.textContent = String(n);
     el.footTotal.textContent = money(total);
     if (bump && !reduceMotion) { el.tag.classList.remove('bump'); void el.tag.offsetWidth; el.tag.classList.add('bump'); }
@@ -246,7 +260,8 @@
       : 'Atenção: já foi ' + Math.floor(total / b * 100) + '% do orçamento. Faltam ' + brl(b - total) + '.';
     ba.root.dataset.level = level;
     // Na tela principal o aviso aparece logo abaixo do total; no leitor, abaixo da barra de cima.
-    ba.root.style.top = scanner.open ? '' : Math.round(el.top.getBoundingClientRect().bottom + 6) + 'px';
+    var anchor = mini.root.classList.contains('show') ? mini.root : el.top;
+    ba.root.style.top = scanner.open ? '' : Math.max(8, Math.round(anchor.getBoundingClientRect().bottom + 6)) + 'px';
     ba.root.hidden = false;
     requestAnimationFrame(function () { ba.root.classList.add('show'); });
     clearTimeout(baTimer); baTimer = setTimeout(hideBudgetAlert, 5000);
@@ -282,10 +297,11 @@
   function tripStart() { return trip.cart.length ? trip.startedAt : Date.now(); }
   // Diferença de preço de uma linha do carrinho em relação à última compra.
   function deltaFor(l) {
-    if (!l.code || l.scale) return null;
-    var m = memory[l.code];
+    var key = memKey(l.code, l.name);
+    if (!key || l.scale) return null;
+    var m = memory[key];
     if (!m || (m.u || 'un') !== l.unit) return null;
-    var prev = lastBefore(l.code, trip.startedAt);
+    var prev = lastBefore(key, trip.startedAt);
     if (!prev || prev[0] === l.price) return null;
     var units = l.unit === 'kg' ? l.grams / 1000 : l.qty;
     return { d: l.price - prev[0], total: Math.round((l.price - prev[0]) * units), prev: prev };
@@ -295,6 +311,7 @@
     var ol = el.lines, has = trip.cart.length > 0, ups = 0, upSum = 0, downs = 0, downSum = 0;
     ol.textContent = '';
     el.empty.hidden = has; el.cols.hidden = !has; el.foot.hidden = !has;
+    fin.box.hidden = !has; if (!has) fin.confirm.hidden = true;
     trip.cart.forEach(function (l) {
       var li = document.createElement('li');
       var b = document.createElement('button');
@@ -795,13 +812,14 @@
     if (alt) ip.hintText.textContent = 'Sistema do mercado: ' + brl(alt.cents) + (isKg ? '/kg' : '');
     ip.obs.hidden = !d.obs; ip.obs.textContent = d.obs || '';
     ip.remove.hidden = d.mode !== 'edit';
+    if (d.code || d.mode === 'edit' || !ip.name.value.trim()) ns.hidden = true;
     renderPriceHist(d);
     renderCalc();
   }
 
   // "Esse preço subiu?": compara com a última compra e com o menor preço visto nos últimos 90 dias.
   function renderPriceHist(d) {
-    var code = d.code, m = code && !d.scale ? memory[code] : null, before = tripStart();
+    var code = memKey(d.code, d.name), m = code && !d.scale ? memory[code] : null, before = tripStart();
     var prev = m ? lastBefore(code, before) : null;
     if (!prev) { ip.ph.hidden = true; return; }
     ip.ph.hidden = false;
@@ -859,9 +877,10 @@
   function openManual(fromScanner, focusEl) {
     openNew();
     draft.fromScanner = !!fromScanner;
-    setStatus(draft, 'idle', fromScanner ? 'Digite o código ou o preço' : 'Sem código lido', 'Digite o preço que está na etiqueta.');
+    setStatus(draft, 'idle', fromScanner ? 'Digite o código ou o preço' : 'Item sem código',
+      fromScanner ? 'Digite o preço que está na etiqueta.' : 'Escreva o nome: o que você já comprou aparece para escolher, com o preço.');
     renderDraft();
-    openPanel(ip.root, focusEl || ip.price);
+    openPanel(ip.root, focusEl || (fromScanner ? ip.price : ip.name));
   }
   function openEdit(id) {
     var l = trip.cart.find(function (x) { return x.id === id; }); if (!l) return;
@@ -1011,20 +1030,21 @@
   }
 
   function learn(d, name) {
-    if (!d.code) return;
+    var key = memKey(d.code, name);
+    if (!key) return;
     var now = Date.now();
     if (d.scale) {
       if (name && d.scale.key) { memory[d.scale.key] = { n: name, t: now, s: settings.store || '' }; saveMemory(); }
       return;
     }
     // Histórico por produto: [preço, quando, mercado], o mais novo primeiro. Uma entrada por compra.
-    var prev = memory[d.code], store = settings.store || '';
+    var prev = memory[key], store = settings.store || '';
     var h = prev && Array.isArray(prev.h) ? prev.h.slice() : (prev && prev.p > 0 ? [[prev.p, prev.t || now, prev.s || '']] : []);
     if (h.length && h[0][1] >= trip.startedAt) h[0] = [d.price, now, store];
     else h.unshift([d.price, now, store]);
     var entry = { n: name || (prev && prev.n) || '', p: d.price, u: d.unit, t: now, s: store, c: ((prev && prev.c) || 0) + (d.mode === 'new' ? 1 : 0), h: h.slice(0, 8) };
     if (d.unit === 'kg') entry.g = d.grams;
-    memory[d.code] = entry;
+    memory[key] = entry;
     var keys = Object.keys(memory);
     if (keys.length > 3000) {
       keys.sort(function (a, b) { return (memory[a].t || 0) - (memory[b].t || 0); });
@@ -1084,18 +1104,25 @@
     renderDraft();
   });
   // Tocar num valor já preenchido seleciona tudo: o que for digitado substitui, não emenda.
-  function selectAllSoon(input) {
-    setTimeout(function () {
-      if (document.activeElement !== input || !input.value) return;
-      try { input.setSelectionRange(0, input.value.length); } catch (e) {}
-    }, 0);
+  // Seleciona na hora do foco, de novo logo depois (o iPhone desfaz a seleção) e no clique, até a pessoa digitar.
+  function selectAllNow(input) { try { input.setSelectionRange(0, input.value.length); } catch (e) {} }
+  function selectOnTap(input, when) {
+    input.addEventListener('focus', function () {
+      input._sel = when() ? input.value : null;
+      if (input._sel == null) return;
+      selectAllNow(input);
+      setTimeout(function () { if (document.activeElement === input && input.value === input._sel) selectAllNow(input); }, 0);
+    });
+    input.addEventListener('click', function () {
+      if (input._sel != null && input.value === input._sel) selectAllNow(input);
+      input._sel = null;
+    });
   }
-  ip.price.addEventListener('focus', function () {
-    if (draft && !draft.priceTouched) selectAllSoon(ip.price);
-    else setTimeout(function () { caretEnd(ip.price); }, 0);
-  });
-  ip.qty.addEventListener('focus', function () { selectAllSoon(ip.qty); });
-  ip.grams.addEventListener('focus', function () { selectAllSoon(ip.grams); });
+  function hasValue(input) { return function () { return !!input.value; }; }
+  selectOnTap(ip.price, function () { return !!(draft && !draft.priceTouched && ip.price.value); });
+  ip.price.addEventListener('focus', function () { if (draft && draft.priceTouched) setTimeout(function () { caretEnd(ip.price); }, 0); });
+  selectOnTap(ip.qty, hasValue(ip.qty));
+  selectOnTap(ip.grams, hasValue(ip.grams));
   ip.qty.addEventListener('input', function () {
     if (!draft) return;
     var n = digitsToInt(ip.qty.value, 3);
@@ -1124,7 +1151,7 @@
   }
   ip.unitUn.addEventListener('click', function () { setUnit('un'); });
   ip.unitKg.addEventListener('click', function () { setUnit('kg'); });
-  ip.name.addEventListener('input', function () { if (!draft) return; draft.name = ip.name.value.slice(0, 80); draft.nameTouched = true; draft.nameFrom = 'digitado'; });
+  ip.name.addEventListener('input', function () { if (!draft) return; draft.name = ip.name.value.slice(0, 80); draft.nameTouched = true; draft.nameFrom = 'digitado'; renderNameSugg(); renderPriceHist(draft); });
   ip.name.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); ip.name.blur(); } });
   function typedCode(finished) {
     if (!draft) return;
@@ -1188,7 +1215,7 @@
   };
   var scanner = {
     open: false, paused: false, stream: null, track: null, caps: {}, timer: 0, session: 0, frame: 0, busy: false, busySince: 0, gap: 30,
-    votes: {}, votesAt: 0, cooldown: { code: '', until: 0 }, since: 0, seenAt: 0, hint: 0, seenT: 0,
+    votes: {}, votesAt: 0, block: null, since: 0, seenAt: 0, hint: 0, seenT: 0,
     torchOn: false, zooms: [], zoom: 1, cams: [], camId: '', switched: false, diag: '',
     canvas: document.createElement('canvas'), ctx: null
   };
@@ -1209,6 +1236,7 @@
     startCamera();
   }
   function closeScanner() {
+    hideFast();
     scanner.open = false; scanner.paused = false;
     stopCamera();
     keepAwake(false);
@@ -1220,7 +1248,7 @@
   function running() { return scanner.open && !scanner.paused && !!scanner.stream; }
   function pauseScanner() { scanner.paused = true; clearTimeout(scanner.timer); }
   function resumeScanner(code) {
-    scanner.cooldown = { code: code || '', until: Date.now() + 3000 };
+    blockCode(code);
     scanner.votes = {}; scanner.paused = false;
     scanner.since = Date.now(); scanner.hint = 0;
     sc.frame.classList.remove('hit', 'seen');
@@ -1455,9 +1483,14 @@
     }, function () { scanner.busy = false; loop(); });
   }
   var SOLID = { nativo: 1, faixa: 1, tela: 1, 'zxing-js': 1 };
+  // O mesmo produto só conta de novo depois de sair da câmera (quase 1 s sem aparecer).
+  function blockCode(code) { var now = Date.now(); scanner.block = code ? { code: code, at: now, seen: now } : null; }
   function onCandidate(hit) {
-    var code = normCode(hit.code), now = Date.now();
-    if (scanner.cooldown.code === code && now < scanner.cooldown.until) return false;
+    var code = normCode(hit.code), now = Date.now(), bl = scanner.block;
+    if (bl && bl.code === code) {
+      if (now - bl.seen < 900 || now - bl.at < 1500) { bl.seen = now; return false; }
+      scanner.block = null;
+    }
     scanner.seenAt = now;
     if (now - (scanner.votesAt || 0) > 1600) scanner.votes = {};
     scanner.votesAt = now;
@@ -1493,9 +1526,17 @@
     beep();
     scanner.lastBy = by || '';
     sc.frame.classList.remove('seen'); sc.frame.classList.add('hit');
+    setTimeout(function () { sc.frame.classList.remove('hit'); }, 600);
+    if (settings.fast && fastAdd(code)) {
+      blockCode(code);
+      scanner.paused = false; scanner.since = Date.now(); scanner.hint = -1;
+      setScanMsg(fast.mode === 'ask' ? 'Esse já está no carrinho.' : 'Adicionado. Aponte para o próximo.');
+      loop();
+      return;
+    }
+    hideFast();
     setScanMsg('Código lido');
     var shot = grabFrame();
-    setTimeout(function () { sc.frame.classList.remove('hit'); }, 600);
     openNew(); draft.fromScanner = true;
     var d = draft;
     openPanel(ip.root, ip.title);
@@ -1507,6 +1548,88 @@
       renderDraft();
     });
   }
+  // Modo rápido: produto com preço salvo (ou já no carrinho) entra direto, sem abrir a tela do item.
+  var fast = { root: $('#fastCard'), name: $('#fastName'), info: $('#fastInfo'), undo: $('#fastUndo'), edit: $('#fastEdit'), timer: 0, before: null, lineId: '' };
+  function fastCandidate(code) {
+    var inCart = trip.cart.filter(function (l) { return l.code === code; })[0];
+    if (inCart) return inCart.unit === 'un' && !inCart.scale ? { line: inCart } : null;
+    var lab = scaleOf(code);
+    if (lab) return lab.cents > 0 ? { price: lab.cents, name: (memory[lab.key] && memory[lab.key].n) || '', scale: true } : null;
+    var m = memory[code];
+    return m && m.p > 0 && (m.u || 'un') === 'un' ? { price: m.p, name: m.n || '', m: m } : null;
+  }
+  function fastAdd(code) {
+    var f = fastCandidate(code);
+    if (!f) return false;
+    // Já está no carrinho: não soma sozinho (a câmera pode passar de novo pelo produto no carrinho); pergunta com um toque.
+    if (f.line) { askMore(f.line); return true; }
+    var before = snapshot(), line, more = false;
+    if (more) {
+      line = f.line; line.qty = Math.min(999, line.qty + 1); line.at = Date.now();
+      trip.cart.splice(trip.cart.indexOf(line), 1); trip.cart.unshift(line);
+    } else {
+      if (!trip.cart.length) trip.startedAt = Date.now();
+      trip.seq += 1;
+      line = { id: uid(), seq: trip.seq, code: code, name: f.name, unit: 'un', price: f.price, qty: 1, grams: 1000, scale: !!f.scale, at: Date.now() };
+      trip.cart.unshift(line);
+      if (f.m) { f.m.c = (f.m.c || 0) + 1; saveMemory(); }
+    }
+    var crossed = linkList(line);
+    saveTrip();
+    renderAll(line.id, true, true);
+    var info = (more ? line.qty + ' no carrinho · ' : '') + brl(line.price);
+    if (f.m && f.m.s && settings.store && !sameStore(f.m.s, settings.store)) info += ' · preço do ' + f.m.s + ', confira';
+    else if (f.m && Date.now() - (f.m.t || 0) > 30 * 864e5) info += ' · preço de ' + ddmm(f.m.t) + ', confira';
+    if (crossed) info += ' · riscado da lista';
+    fast.before = before; fast.lineId = line.id; fast.mode = 'added';
+    fast.undo.textContent = 'Desfazer';
+    fast.name.textContent = displayName(line);
+    fast.info.textContent = info;
+    fast.root.hidden = false;
+    fast.root.classList.remove('pop'); void fast.root.offsetWidth; fast.root.classList.add('pop');
+    clearTimeout(fast.timer);
+    fast.timer = setTimeout(hideFast, 6000);
+    return true;
+  }
+  function askMore(line) {
+    fast.before = null; fast.lineId = line.id; fast.mode = 'ask';
+    fast.undo.textContent = 'Mais 1';
+    fast.name.textContent = displayName(line);
+    fast.info.textContent = 'Já está no carrinho: ' + line.qty + ' × ' + brl(line.price);
+    fast.root.hidden = false;
+    fast.root.classList.remove('pop'); void fast.root.offsetWidth; fast.root.classList.add('pop');
+    clearTimeout(fast.timer);
+    fast.timer = setTimeout(hideFast, 6000);
+  }
+  function hideFast() { clearTimeout(fast.timer); fast.root.hidden = true; fast.before = null; }
+  fast.undo.addEventListener('click', function () {
+    if (fast.mode === 'ask') {
+      var line = trip.cart.filter(function (l) { return l.id === fast.lineId; })[0];
+      if (!line) { hideFast(); return; }
+      var before = snapshot();
+      line.qty = Math.min(999, line.qty + 1); line.at = Date.now();
+      trip.cart.splice(trip.cart.indexOf(line), 1); trip.cart.unshift(line);
+      saveTrip(); renderAll(line.id, true, true);
+      fast.before = before; fast.mode = 'added';
+      fast.undo.textContent = 'Desfazer';
+      fast.info.textContent = line.qty + ' no carrinho · ' + brl(line.price) + ' cada';
+      clearTimeout(fast.timer); fast.timer = setTimeout(hideFast, 6000);
+      return;
+    }
+    var b = fast.before;
+    if (!b) return;
+    hideFast();
+    restore(b, 'Desfeito.');
+  });
+  fast.edit.addEventListener('click', function () {
+    var id = fast.lineId;
+    hideFast();
+    if (!trip.cart.some(function (l) { return l.id === id; })) return;
+    pauseScanner();
+    openEdit(id);
+    if (draft) draft.fromScanner = true;
+  });
+
   function grabFrame() {
     return new Promise(function (resolve) {
       var v = sc.video;
@@ -1536,8 +1659,8 @@
 
   sc.close.addEventListener('click', closeScanner);
   sc.type.addEventListener('click', function () { pauseScanner(); openManual(true, ip.code); });
-  $('#scanBtn').addEventListener('click', openScanner);
-  $('#typeBtn').addEventListener('click', function () { openManual(false); });
+  $('#scanBtn').addEventListener('click', function () { begin(openScanner); });
+  $('#typeBtn').addEventListener('click', function () { begin(function () { openManual(false); }); });
 
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) { if (scanner.stream) stopCamera(); return; }
@@ -1598,7 +1721,8 @@
   function linkList(line) {
     if (!list.length || list.some(function (it) { return it.lineId === line.id; })) return null;
     var rows = listRows(), open = rows.filter(function (r) { return !r.done && !r.line; }).map(function (r) { return r.it; });
-    var hit = (line.code && open.filter(function (it) { return it.code && it.code === line.code; })[0]) ||
+    var lk = memKey(line.code, line.name);
+    var hit = (lk && open.filter(function (it) { return it.code && it.code === lk; })[0]) ||
       open.filter(function (it) { return nameMatches(it.text, line.name || ''); })[0];
     if (!hit) return null;
     hit.lineId = line.id;
@@ -1803,11 +1927,155 @@
     setStore(b.dataset.store);
   });
 
+  /* ---------------- início e fim de compra ---------------- */
+  // Na primeira leitura de uma compra nova: em qual mercado e quanto pretende gastar.
+  var st = {
+    root: $('#startPanel'), title: $('#startTitle'), close: $('#startClose'), skip: $('#startSkip'),
+    stores: $('#startStores'), storeIn: $('#startStoreInput'), chips: $('#startBudgetChips'), budget: $('#startBudget'), go: $('#startGo'), next: null
+  };
+  var BUDGETS = [10000, 15000, 20000, 30000, 50000];
+  function begin(next) {
+    if (trip.cart.length || trip.setup) { next(); return; }
+    st.next = next;
+    renderStart();
+    st.storeIn.hidden = true;
+    openPanel(st.root, st.title);
+  }
+  function renderStart() {
+    renderStoreChips(st.stores, true);
+    st.chips.textContent = '';
+    BUDGETS.forEach(function (v) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.dataset.v = String(v); b.textContent = brl(v).replace(',00', '');
+      b.setAttribute('aria-pressed', String(settings.budget === v));
+      st.chips.appendChild(b);
+    });
+    var none = document.createElement('button');
+    none.type = 'button'; none.dataset.v = '0'; none.textContent = 'Sem limite';
+    none.setAttribute('aria-pressed', String(!settings.budget));
+    st.chips.appendChild(none);
+    if (document.activeElement !== st.budget) st.budget.value = settings.budget && BUDGETS.indexOf(settings.budget) < 0 ? money(settings.budget) : '';
+    st.go.textContent = st.next === openScanner ? 'Começar a escanear' : 'Começar';
+  }
+  function startGo() {
+    trip.setup = true; saveTrip();
+    var next = st.next; st.next = null;
+    closePanel(true);
+    if (next) next();
+  }
+  st.stores.addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.other) { st.storeIn.hidden = false; st.storeIn.value = ''; st.storeIn.focus(); return; }
+    setStore(b.dataset.store); st.storeIn.hidden = true; renderStart();
+  });
+  st.storeIn.addEventListener('input', function () { setStore(st.storeIn.value); renderStoreChips(st.stores, true); });
+  st.storeIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); st.storeIn.blur(); } });
+  st.chips.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-v]');
+    if (!b) return;
+    settings.budget = parseInt(b.dataset.v, 10) || null; saveSettings();
+    st.budget.value = ''; renderStart(); renderTotals();
+  });
+  selectOnTap(st.budget, hasValue(st.budget));
+  st.budget.addEventListener('input', function () {
+    var c = digitsToInt(st.budget.value, 7);
+    settings.budget = c || null; saveSettings();
+    st.budget.value = c ? money(c) : ''; caretEnd(st.budget);
+    renderStart(); renderTotals();
+  });
+  st.go.addEventListener('click', startGo);
+  st.skip.addEventListener('click', startGo);
+  st.close.addEventListener('click', function () { st.next = null; closePanel(); });
+
+  // Fim da compra: guarda no histórico, tira da lista o que já foi pego e zera o carrinho e o mercado.
+  function finishSummary() {
+    var taken = listRows().filter(function (r) { return r.done; }).length;
+    return 'Guardar ' + plural(trip.cart.length, 'item', 'itens') + ' (' + brl(cartTotal(trip.cart)) + ') no histórico e começar do zero?' +
+      (taken ? ' ' + (taken === 1 ? 'O item já pego sai da lista.' : 'Os ' + taken + ' itens já pegos saem da lista.') : '');
+  }
+  function finishTrip() {
+    var before = snapshot(), had = trip.cart.length > 0, listBefore = JSON.parse(JSON.stringify(list)), storeBefore = settings.store;
+    list = listRows().filter(function (r) { return !r.done; }).map(function (r) {
+      if (r.got) r.it.qty = r.rest;
+      r.it.lineId = '';
+      return r.it;
+    });
+    saveList();
+    if (had) {
+      history.unshift({ at: trip.startedAt, end: Date.now(), store: settings.store || '', total: cartTotal(trip.cart), lines: trip.cart.length });
+      history = history.slice(0, 60); saveHistory();
+    }
+    trip.cart = []; trip.seq = 0; trip.startedAt = Date.now(); trip.setup = false; saveTrip();
+    settings.store = ''; saveSettings();
+    fin.confirm.hidden = true;
+    closePanel(); renderAll(null, true);
+    window.scrollTo({ top: 0 });
+    toast('Compra guardada no histórico. Carrinho zerado.', function () {
+      if (had) { history.shift(); saveHistory(); }
+      list = cleanList(listBefore); saveList();
+      settings.store = storeBefore; saveSettings();
+      trip.setup = true;
+      restore(before, 'Compra recuperada.');
+    });
+  }
+  var fin = { box: $('#finishBox'), btn: $('#finishBtn'), confirm: $('#finishConfirm'), summary: $('#finishSummary'), yes: $('#finishYes'), no: $('#finishNo') };
+  fin.btn.addEventListener('click', function () {
+    fin.summary.textContent = finishSummary();
+    fin.confirm.hidden = false;
+    fin.confirm.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
+    try { fin.yes.focus({ preventScroll: true }); } catch (e) {}
+  });
+  fin.no.addEventListener('click', function () { fin.confirm.hidden = true; });
+  fin.yes.addEventListener('click', finishTrip);
+
+  /* ---------------- nome de item sem código: escolher um já comprado ---------------- */
+  var ns = $('#nameSugg');
+  function renderNameSugg() {
+    var d = draft;
+    ns.textContent = '';
+    var q = d && d.mode !== 'edit' && !d.code ? ip.name.value.trim() : '';
+    var keys = q.length >= 2 ? Object.keys(memory).filter(function (k) {
+      var m = memory[k];
+      return k.indexOf('balanca:') !== 0 && m && m.n && m.p > 0 && typeMatches(q, m.n) && normText(m.n) !== normText(q);
+    }) : [];
+    keys.sort(function (a, b) { return ((memory[b].c || 0) - (memory[a].c || 0)) || ((memory[b].t || 0) - (memory[a].t || 0)); });
+    keys = keys.slice(0, 5);
+    ns.hidden = !keys.length;
+    keys.forEach(function (k) {
+      var m = memory[k], b = document.createElement('button');
+      b.type = 'button'; b.className = 'np-chip'; b.dataset.key = k;
+      b.append(span('np-chip-name', m.n), span('np-chip-price', money(m.p) + (m.u === 'kg' ? '/kg' : '')));
+      ns.appendChild(b);
+    });
+  }
+  ns.addEventListener('pointerdown', function (e) { if (e.target.closest('button')) e.preventDefault(); });
+  ns.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-key]'), d = draft;
+    if (!b || !d || !memory[b.dataset.key]) return;
+    var key = b.dataset.key, m = memory[key];
+    ns.hidden = true;
+    if (key.indexOf('nome:') !== 0) {
+      ip.code.value = key; d.lastTyped = key;
+      applyCode(key, 'digitado');
+      return;
+    }
+    setName(m.n, 'memoria'); d.nameTouched = true;
+    d.unit = m.u === 'kg' ? 'kg' : 'un'; d.unitUser = true;
+    if (d.unit === 'kg') { d.grams = m.g || 1000; ip.grams.value = kg(d.grams); }
+    if (!d.priceTouched) setPrice(m.p, 'memoria');
+    var other = m.s && settings.store && !sameStore(m.s, settings.store);
+    d.memNote = other ? 'Último preço é do ' + m.s + '. Aqui pode ser outro: confira na etiqueta.' : 'Último preço salvo. Confira na etiqueta.';
+    setStatus(d, 'ok', 'Item já comprado', d.memNote);
+    renderDraft();
+    if (d.unit === 'kg') { try { ip.grams.focus(); } catch (x) {} }
+  });
+
   /* ---------------- options ---------------- */
   var mp = {
     root: $('#menuPanel'), title: $('#menuTitle'), close: $('#menuClose'), install: $('#menuInstall'),
     store: $('#storeInput'), storeChips: $('#storeChips'), budget: $('#budgetInput'), budgetClear: $('#budgetClear'), budgetChips: $('#budgetChips'), diag: $('#diagInfo'),
-    beep: $('#beepToggle'), catalog: $('#catalogToggle'),
+    beep: $('#beepToggle'), catalog: $('#catalogToggle'), fast: $('#fastToggle'),
     newTrip: $('#newTrip'), newConfirm: $('#newConfirm'), newSummary: $('#newSummary'), newYes: $('#newYes'), newNo: $('#newNo'),
     hist: $('#histList'), histEmpty: $('#histEmpty'), monthSum: $('#monthSum'),
     dataInfo: $('#dataInfo'), exportBtn: $('#exportBtn'), importBtn: $('#importBtn'), importFile: $('#importFile'),
@@ -1843,7 +2111,7 @@
     mp.store.value = settings.store;
     renderStoreChips(mp.storeChips, false);
     mp.budget.value = settings.budget ? money(settings.budget) : '';
-    mp.beep.checked = !!settings.beep; mp.catalog.checked = !!settings.catalog;
+    mp.beep.checked = !!settings.beep; mp.catalog.checked = !!settings.catalog; mp.fast.checked = !!settings.fast;
     mp.priceUrl.value = settings.priceUrl;
     mp.integrationMsg.hidden = true;
     mp.newConfirm.hidden = true; mp.memConfirm.hidden = true; mp.importConfirm.hidden = true;
@@ -1863,7 +2131,7 @@
     setStore(b.dataset.store); mp.store.value = settings.store; renderStoreChips(mp.storeChips, false);
   });
   mp.store.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); mp.store.blur(); } });
-  mp.budget.addEventListener('focus', function () { selectAllSoon(mp.budget); });
+  selectOnTap(mp.budget, hasValue(mp.budget));
   mp.budget.addEventListener('input', function () {
     var c = digitsToInt(mp.budget.value, 7);
     settings.budget = c || null; mp.budget.value = c ? money(c) : ''; caretEnd(mp.budget);
@@ -1876,6 +2144,7 @@
   });
   mp.beep.addEventListener('change', function () { settings.beep = mp.beep.checked; saveSettings(); if (settings.beep) { primeAudio(); beep(); } });
   mp.catalog.addEventListener('change', function () { settings.catalog = mp.catalog.checked; saveSettings(); });
+  mp.fast.addEventListener('change', function () { settings.fast = mp.fast.checked; saveSettings(); });
   function saveUrl(input, key, label) {
     var v = input.value.trim();
     if (v && !validUrl(v)) {
@@ -1889,32 +2158,11 @@
   mp.priceUrl.addEventListener('change', function () { saveUrl(mp.priceUrl, 'priceUrl', 'Tabela de preços'); });
 
   mp.newTrip.addEventListener('click', function () {
-    var taken = listRows().filter(function (r) { return r.done; }).length;
-    mp.newSummary.textContent = 'Guardar ' + plural(trip.cart.length, 'item', 'itens') + ' (' + brl(cartTotal(trip.cart)) + ') no histórico e zerar o carrinho?' +
-      (taken ? ' ' + (taken === 1 ? 'O item já pego sai da lista.' : 'Os ' + taken + ' itens já pegos saem da lista.') : '');
+    mp.newSummary.textContent = finishSummary();
     mp.newConfirm.hidden = false; mp.newYes.focus();
   });
   mp.newNo.addEventListener('click', function () { mp.newConfirm.hidden = true; mp.newTrip.focus(); });
-  mp.newYes.addEventListener('click', function () {
-    var before = snapshot(), had = trip.cart.length > 0, listBefore = JSON.parse(JSON.stringify(list));
-    list = listRows().filter(function (r) { return !r.done; }).map(function (r) {
-      if (r.got) r.it.qty = r.rest;
-      r.it.lineId = '';
-      return r.it;
-    });
-    saveList();
-    if (had) {
-      history.unshift({ at: trip.startedAt, end: Date.now(), store: settings.store || '', total: cartTotal(trip.cart), lines: trip.cart.length });
-      history = history.slice(0, 60); saveHistory();
-    }
-    trip.cart = []; trip.seq = 0; trip.startedAt = Date.now(); saveTrip();
-    closePanel(); renderAll(null, true);
-    toast('Carrinho zerado. A compra anterior foi para o histórico.', function () {
-      if (had) { history.shift(); saveHistory(); }
-      list = cleanList(listBefore); saveList();
-      restore(before, 'Compra recuperada.');
-    });
-  });
+  mp.newYes.addEventListener('click', finishTrip);
   mp.memClear.addEventListener('click', function () { mp.memConfirm.hidden = false; mp.memYes.focus(); });
   mp.memNo.addEventListener('click', function () { mp.memConfirm.hidden = true; mp.memClear.focus(); });
   mp.memYes.addEventListener('click', function () {

@@ -12,9 +12,16 @@ Você aponta a câmera para o código de barras, confere preço e quantidade, e 
   - Abre a lente principal (no Android, troca para a `camera2 0` se o navegador abrir outra), com foco contínuo e zoom de 1,5× (2× no iPhone).
   - Na tela do leitor dá para trocar a lente, ligar a lanterna, mudar o zoom e tocar na imagem para focar.
   - Formatos lidos: EAN-13, EAN-8, UPC-A, UPC-E e ITF-14.
+- **Modo rápido**: produto com preço salvo entra no carrinho com o bip, sem abrir a tela do item; uma faixa amarela
+  mostra nome e preço, com Desfazer e Editar. Se o produto já está no carrinho, ele pergunta antes ("Mais 1"), porque a
+  câmera pode passar de novo pelo produto dentro do carrinho. Dá para desligar nas Opções.
+- **Começo e fim de compra**: na primeira leitura de uma compra nova, o app pergunta o mercado e quanto pretende gastar
+  (com atalhos). No fim do cupom fica o botão **Finalizar compra**, que guarda no histórico, tira da lista o que já foi
+  pego e zera carrinho e mercado.
+- **Topo compacto**: quando o total grande sai da tela, uma faixa fina com o total e quanto falta fica no topo.
 - **Nome automático**: busca o código no catálogo aberto [Open Food Facts](https://world.openfoodfacts.org) e nos catálogos irmãos.
 - **Preço**:
-  - você digita uma vez e o celular lembra na próxima compra;
+  - você digita uma vez e o celular lembra na próxima compra, inclusive item sem código (pão, frutas, frios), guardado pelo nome;
   - etiqueta de balança (EAN-13 começando com `2`) já traz o total no código.
 - **Lista de compras**: você monta em casa (aceita "2 leite"); sugere os produtos que você mais compra. No mercado,
   cada produto que entra no carrinho risca o item da lista sozinho (pelo código ou pelo nome), e o app mostra a

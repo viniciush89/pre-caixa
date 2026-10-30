@@ -88,8 +88,7 @@ button:disabled{cursor:default}
 svg{display:block;flex:none}
 
 /* ---------- top: the price tag ---------- */
-.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--ground);transition:box-shadow .2s}
-.top.scrolled{box-shadow:0 10px 14px -12px var(--shadow)}
+.top{position:relative;z-index:5;background:var(--ground)}
 .top-in{max-width:560px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:4px 10px;display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
 .bar{display:flex;align-items:center;gap:8px;min-height:44px}
 .mark{margin:0;display:flex;align-items:center;gap:9px;font-family:var(--font-tag);font-weight:900;font-size:25px;line-height:1;letter-spacing:.04em;text-transform:uppercase}
@@ -207,6 +206,15 @@ button.line:active{background:var(--press)}
 .scan-frame.hit .laser{background:var(--hit);box-shadow:none}
 .scan-msg{position:relative;margin:0;max-width:34ch;text-align:center;font-weight:800;font-size:17px;line-height:1.35;text-shadow:0 1px 3px rgba(0,0,0,.7)}
 .scan-msg.err{padding:10px 14px;border-radius:12px;background:var(--cam-glass);text-shadow:none}
+.fast{position:absolute;left:max(16px,env(safe-area-inset-left,0px));right:max(16px,env(safe-area-inset-right,0px));bottom:calc(92px + env(safe-area-inset-bottom,0px));z-index:2;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;max-width:528px;margin:0 auto;padding:10px 10px 10px 14px;border-radius:8px 8px 4px 4px;background:var(--tag);color:var(--tag-ink);box-shadow:inset 0 -4px 0 rgba(23,21,11,.14),0 12px 24px -10px rgba(0,0,0,.6)}
+.fast.pop{animation:fastpop .28s ease-out}
+@keyframes fastpop{0%{transform:translateY(10px);opacity:0}100%{transform:none;opacity:1}}
+.fast-text{display:grid;gap:2px;min-width:0}
+.fast-text b{font-weight:800;font-size:16px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fast-text span{font-size:14px;line-height:1.3;font-weight:600;overflow-wrap:anywhere}
+.fast-btns{display:flex;gap:6px}
+.fast-btns button{min-height:42px;padding:0 12px;border:0;border-radius:9px;background:var(--tag-ink);color:var(--tag);font-weight:800;font-size:14.5px}
+.fast-btns button:first-child{background:transparent;color:var(--tag-ink);box-shadow:inset 0 0 0 1.5px var(--tag-ink)}
 .scan-bottom{position:relative;display:flex;flex-wrap:wrap;justify-content:center;gap:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:12px 18px}
 .scan-btn{display:inline-flex;align-items:center;gap:8px;min-height:48px;padding:0 16px;border:1.5px solid var(--cam-line);border-radius:999px;background:var(--cam-glass);color:var(--cam-ink);font-weight:800;font-size:15.5px;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
 .scan-btn svg{width:20px;height:20px}
@@ -320,6 +328,28 @@ button.line:active{background:var(--press)}
 .h-where{overflow-wrap:anywhere}
 .h-total{font-family:var(--font-print);font-variant-numeric:tabular-nums;white-space:nowrap}
 
+/* ---------- compact total: appears when the big tag scrolls away ---------- */
+.mini{position:fixed;top:0;left:0;right:0;z-index:11;padding-top:env(safe-area-inset-top,0px);background:var(--tag);color:var(--tag-ink);box-shadow:0 8px 16px -10px var(--shadow);transform:translateY(-110%);transition:transform .2s ease;pointer-events:none}
+.mini.show{transform:none;pointer-events:auto}
+.mini[data-level="near"]{background:var(--tag-near);color:var(--tag-near-ink)}
+.mini[data-level="close"]{background:var(--tag-close);color:var(--tag-close-ink)}
+.mini[data-level="over"]{background:repeating-linear-gradient(-45deg,var(--tag-stripe) 0 10px,transparent 10px 20px),var(--tag-over);color:var(--tag-over-ink)}
+.mini button{display:flex;align-items:baseline;justify-content:space-between;gap:12px;width:100%;max-width:560px;min-height:50px;margin:0 auto;padding-block:8px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));border:0;background:transparent;color:inherit;text-align:left}
+.mini-total{font-family:var(--font-tag);font-weight:900;font-size:28px;line-height:1;font-variant-numeric:tabular-nums lining-nums}
+.mini-info{font-family:var(--font-tag);font-weight:800;font-size:17px;letter-spacing:.03em;text-transform:uppercase;font-variant-numeric:tabular-nums}
+
+/* ---------- finish the purchase ---------- */
+.finish{display:grid;gap:10px;margin:18px 0 6px}
+.btn-finish{display:flex;align-items:center;justify-content:center;gap:10px;min-height:56px;border:2px solid var(--ink);border-radius:14px;background:transparent;color:var(--ink);font-family:var(--font-tag);font-weight:900;font-size:22px;letter-spacing:.04em;text-transform:uppercase}
+.btn-finish svg{width:24px;height:24px}
+.btn-finish:active{background:var(--press)}
+
+/* ---------- start of a purchase ---------- */
+.chips.big button{min-height:46px;padding:0 16px;font-size:16px}
+
+/* ---------- name suggestions in the item panel ---------- */
+.name-sugg{display:flex;flex-wrap:wrap;gap:6px}
+
 /* ---------- tabs ---------- */
 .tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:0 0 12px;padding:3px;border-radius:13px;background:var(--ground-2)}
 .tabs button{display:flex;align-items:center;justify-content:center;gap:8px;min-height:44px;border:0;border-radius:10px;background:transparent;color:var(--ink-2);font-weight:800;font-size:15.5px}
@@ -390,7 +420,7 @@ button.line:active{background:var(--press)}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 .toast p{flex:1;min-width:0;margin:0;padding-block:8px;font-weight:700;font-size:15px;line-height:1.3;overflow-wrap:anywhere}
 .toast button{min-height:42px;padding:0 14px;border:0;border-radius:10px;background:var(--tag);color:var(--tag-ink);font-weight:800}
-.scanning .toast{bottom:calc(150px + env(safe-area-inset-bottom,0px))}
+.scanning .toast{bottom:calc(190px + env(safe-area-inset-bottom,0px))}
 .panel-open .toast{top:calc(66px + env(safe-area-inset-top,0px));bottom:auto}
 
 @media (min-width:600px){

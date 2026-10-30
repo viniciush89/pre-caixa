@@ -16,7 +16,7 @@
 <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="preload" href="fonts/sofia-sans-extra-condensed-latin-900-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="app.css?v=1.2.0">
+<link rel="stylesheet" href="app.css?v=1.3.0">
 </head>
 <body>
 
@@ -38,6 +38,7 @@
     </button>
   </div>
 </header>
+<div class="mini" id="mini" aria-hidden="true"><button type="button" id="miniBtn" tabindex="-1"><span class="mini-total" id="miniTotal">R$ 0,00</span><span class="mini-info" id="miniInfo"></span></button></div>
 
 <main class="wrap">
   <div class="install" id="installBox" hidden>
@@ -81,6 +82,13 @@
     </div>
     <p class="r-fine">Preço no caixa diferente da etiqueta? Vale o menor (Lei 10.962/2004, art. 5º)<br>Não é documento fiscal</p>
   </section>
+  <div class="finish" id="finishBox" hidden>
+    <button class="btn-finish" id="finishBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Finalizar compra</button>
+    <div class="confirm" id="finishConfirm" hidden>
+      <p id="finishSummary"></p>
+      <div class="btn-pair"><button class="btn-wide strong" id="finishYes" type="button">Finalizar</button><button class="btn-wide" id="finishNo" type="button">Voltar</button></div>
+    </div>
+  </div>
   </div>
 
   <div id="listView" role="tabpanel" aria-labelledby="tabList" hidden>
@@ -125,6 +133,10 @@
     <div class="scan-mid" id="scanMid">
       <div class="scan-frame" id="scanFrame"><i class="laser"></i></div>
       <p class="scan-msg" id="scanMsg">Abrindo a câmera…</p>
+    </div>
+    <div class="fast" id="fastCard" role="status" hidden>
+      <div class="fast-text"><b id="fastName"></b><span id="fastInfo"></span></div>
+      <div class="fast-btns"><button type="button" id="fastUndo">Desfazer</button><button type="button" id="fastEdit">Editar</button></div>
     </div>
     <div class="scan-bottom">
       <button class="scan-btn" id="scanTorch" type="button" aria-pressed="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3h8l-1.5 6h-5z"/><path d="M9.5 9h5v11a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1z"/><path d="M12 13v2.5"/></svg>Lanterna</button>
@@ -184,6 +196,7 @@
     <div class="field">
       <label for="nameInput">Produto <span class="opt">opcional</span></label>
       <input class="inp" id="nameInput" type="text" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" maxlength="80" placeholder="Ex.: Leite integral 1 L">
+      <div class="name-sugg" id="nameSugg" hidden></div>
     </div>
 
     <div class="field">
@@ -197,6 +210,29 @@
     </div>
     <button class="btn-primary" id="itemSubmit" type="button" disabled>Adicionar</button>
     <button class="btn-danger" id="itemRemove" type="button" hidden>Remover do carrinho</button>
+  </div></div>
+</section>
+
+<section class="panel" id="startPanel" role="dialog" aria-modal="true" aria-labelledby="startTitle" hidden>
+  <div class="p-bar"><div class="p-bar-in">
+    <button class="icon-btn" id="startClose" type="button" aria-label="Voltar"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <h2 class="p-title" id="startTitle" tabindex="-1">Nova compra</h2>
+    <button class="btn-mini ghost" id="startSkip" type="button">Pular</button>
+  </div></div>
+  <div class="p-body"><div class="p-body-in">
+    <div class="field">
+      <span class="f-label">Em qual mercado você está?</span>
+      <div class="chips big" id="startStores"></div>
+      <input class="inp" id="startStoreInput" type="text" autocomplete="off" maxlength="40" enterkeyhint="done" placeholder="Nome do mercado" hidden>
+      <p class="help">Assim o app compara os preços entre mercados.</p>
+    </div>
+    <div class="field">
+      <label for="startBudget">Quanto pretende gastar hoje?</label>
+      <div class="chips big" id="startBudgetChips"></div>
+      <div class="money"><span class="pre" aria-hidden="true">R$</span><input id="startBudget" type="text" inputmode="numeric" autocomplete="off" placeholder="Outro valor"></div>
+      <p class="help">O total fica laranja aos 75% desse valor e vermelho aos 90%.</p>
+    </div>
+    <button class="btn-primary" id="startGo" type="button">Começar a escanear</button>
   </div></div>
 </section>
 
@@ -223,12 +259,13 @@
     </div>
     <div class="group">
       <label class="switch"><input type="checkbox" id="beepToggle"><span><b>Bip ao ler o código</b><small>O mesmo aviso do caixa, bem baixinho.</small></span></label>
+      <label class="switch"><input type="checkbox" id="fastToggle"><span><b>Adicionar direto com o bip</b><small>Produto com preço salvo entra no carrinho na hora, sem abrir a tela do item. Toque em Editar na faixa amarela para mudar preço ou quantidade.</small></span></label>
       <label class="switch"><input type="checkbox" id="catalogToggle"><span><b>Buscar o nome do produto</b><small>Consulta o código no catálogo aberto Open Food Facts quando o produto é novo. Precisa de internet.</small></span></label>
     </div>
     <div class="group">
-      <h3>Nova compra</h3>
-      <p class="help">Guarda esta compra no histórico e zera o carrinho.</p>
-      <button class="btn-wide" id="newTrip" type="button">Começar nova compra</button>
+      <h3>Finalizar compra</h3>
+      <p class="help">Guarda esta compra no histórico e zera o carrinho. O botão também fica no fim do cupom.</p>
+      <button class="btn-wide" id="newTrip" type="button">Finalizar compra</button>
       <div class="confirm" id="newConfirm" hidden>
         <p id="newSummary"></p>
         <div class="btn-pair"><button class="btn-wide strong" id="newYes" type="button">Guardar e zerar</button><button class="btn-wide" id="newNo" type="button">Cancelar</button></div>
@@ -272,6 +309,6 @@
 <div class="toast" id="toast" hidden><p id="toastMsg" role="status"></p><button type="button" id="toastUndo" hidden>Desfazer</button></div>
 
 <script src="vendor/zxing-wasm-reader-3.1.5.js"></script>
-<script src="app.js?v=1.2.0"></script>
+<script src="app.js?v=1.3.0"></script>
 </body>
 </html>
