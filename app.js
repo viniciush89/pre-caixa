@@ -4,7 +4,7 @@
    - o que você mesmo ligar em Opções > Integrações. */
 (function () {
   'use strict';
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
   var $ = function (s) { return document.querySelector(s); };
   var reduceMotion = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 
@@ -22,13 +22,16 @@
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
   function num(v, d) { return typeof v === 'number' && isFinite(v) ? v : d; }
 
-  var DEFAULTS = { store: '', budget: null, beep: true, catalog: true, priceUrl: '', visionUrl: '', installDismissed: false };
+  var DEFAULTS = { store: '', budget: null, beep: true, catalog: true, priceUrl: '', installDismissed: false, cameraId: '', zoom: 0 };
   function cleanSettings(s) {
     s = Object.assign({}, DEFAULTS, s && typeof s === 'object' ? s : {});
     if (typeof s.store !== 'string') s.store = '';
     if (!(num(s.budget, 0) > 0)) s.budget = null;
-    ['priceUrl', 'visionUrl'].forEach(function (k) { if (typeof s[k] !== 'string') s[k] = ''; });
+    if (typeof s.priceUrl !== 'string') s.priceUrl = '';
+    delete s.visionUrl;
     s.beep = s.beep !== false; s.catalog = s.catalog !== false; s.installDismissed = !!s.installDismissed;
+    if (typeof s.cameraId !== 'string') s.cameraId = '';
+    s.zoom = num(s.zoom, 0); if (!(s.zoom >= 1 && s.zoom <= 3)) s.zoom = 0;
     return s;
   }
   function cleanTrip(t) {
@@ -143,33 +146,80 @@
     top: $('#top'), tag: $('#tag'), tagCount: $('#tagCount'), tagInt: $('#tagInt'), tagDec: $('#tagDec'), tagSpoken: $('#tagSpoken'),
     budget: $('#budgetBtn'), meter: $('#meterFill'), budgetL: $('#budgetL'), budgetR: $('#budgetR'),
     lines: $('#lines'), cols: $('#rCols'), empty: $('#rEmpty'), foot: $('#rFoot'), footCount: $('#footCount'), footTotal: $('#footTotal'),
-    rDate: $('#rDate'), rStore: $('#rStore'), storageWarn: $('#storageWarn'), scanTotal: $('#scanTotal')
+    rDate: $('#rDate'), rStore: $('#rStore'), storageWarn: $('#storageWarn'), scanTotal: $('#scanTotal'), tagLabel: $('#tagLabel')
   };
 
-  function renderTotals(bump) {
-    var total = cartTotal(trip.cart), n = trip.cart.length;
+  // Faixas do orçamento: amarelo até 75%, laranja até 90%, vermelho até o limite, vermelho listrado depois.
+  var LEVEL_RANK = { none: 0, ok: 0, near: 1, close: 2, over: 3 };
+  var shownLevel = null;
+  function budgetLevel(total, b) {
+    if (!b) return 'none';
+    var r = total / b;
+    return r > 1 ? 'over' : r >= 0.9 ? 'close' : r >= 0.75 ? 'near' : 'ok';
+  }
+  function renderTotals(bump, alert) {
+    var total = cartTotal(trip.cart), n = trip.cart.length, b = settings.budget;
     var s = money(total), i = s.lastIndexOf(',');
     el.tagInt.textContent = s.slice(0, i);
     el.tagDec.textContent = s.slice(i);
     el.tagCount.textContent = plural(n, 'item', 'itens');
-    el.tagSpoken.textContent = 'Total no carrinho: ' + brl(total) + ', ' + plural(n, 'item', 'itens');
-    el.scanTotal.textContent = brl(total) + ' · ' + plural(n, 'item', 'itens');
-    var b = settings.budget;
+    var lvl = budgetLevel(total, b), pct = b ? Math.floor(total / b * 100) : 0;
+    el.tag.dataset.level = lvl; el.scanTotal.dataset.level = lvl; el.budget.dataset.state = lvl;
+    el.tagLabel.textContent = lvl === 'near' ? 'Atenção · ' + pct + '% do orçamento'
+      : lvl === 'close' ? (total === b ? 'No limite do orçamento' : 'Quase no limite · ' + pct + '%')
+      : lvl === 'over' ? 'Passou do orçamento' : 'Total no carrinho';
+    var spoken = 'Total no carrinho: ' + brl(total) + ', ' + plural(n, 'item', 'itens');
     if (!b) {
-      el.budget.dataset.state = 'none'; el.meter.style.width = '0%';
+      el.meter.style.width = '0%';
       el.budgetL.textContent = 'Sem orçamento'; el.budgetR.textContent = 'Definir limite';
+      el.scanTotal.textContent = brl(total) + ' · ' + plural(n, 'item', 'itens');
     } else {
-      var ratio = total / b;
-      el.budget.dataset.state = ratio > 1 ? 'over' : ratio >= 0.85 ? 'warn' : 'ok';
-      el.meter.style.width = Math.min(100, ratio * 100).toFixed(1) + '%';
+      el.meter.style.width = Math.min(100, total / b * 100).toFixed(1) + '%';
       setRich(el.budgetL, 'Orçamento ', brl(b));
-      if (total > b) setRich(el.budgetR, 'Passou ', brl(total - b));
-      else setRich(el.budgetR, 'Faltam ', brl(b - total));
+      if (total > b) {
+        setRich(el.budgetR, 'Passou ', brl(total - b));
+        el.scanTotal.textContent = brl(total) + ' · passou ' + brl(total - b);
+        spoken += '. Passou do orçamento em ' + brl(total - b);
+      } else {
+        setRich(el.budgetR, 'Faltam ', brl(b - total));
+        el.scanTotal.textContent = brl(total) + ' · faltam ' + brl(b - total);
+        spoken += '. Faltam ' + brl(b - total) + ' para o orçamento';
+      }
     }
+    el.tagSpoken.textContent = spoken;
     el.footCount.textContent = String(n);
     el.footTotal.textContent = money(total);
     if (bump && !reduceMotion) { el.tag.classList.remove('bump'); void el.tag.offsetWidth; el.tag.classList.add('bump'); }
+    if (alert && shownLevel !== null && LEVEL_RANK[lvl] > LEVEL_RANK[shownLevel]) budgetAlert(lvl, total, b);
+    else if (shownLevel !== null && LEVEL_RANK[lvl] < LEVEL_RANK[shownLevel] && !ba.root.hidden) hideBudgetAlert();
+    shownLevel = lvl;
   }
+
+  var ba = { root: $('#budgetAlert'), text: $('#budgetAlertText') }, baTimer = 0;
+  function budgetAlert(level, total, b) {
+    ba.text.textContent = level === 'over' ? 'Passou do orçamento em ' + brl(total - b) + '.'
+      : level === 'close' ? (total === b ? 'Você chegou ao limite do orçamento.' : 'Quase no limite: faltam só ' + brl(b - total) + '.')
+      : 'Atenção: já foi ' + Math.floor(total / b * 100) + '% do orçamento. Faltam ' + brl(b - total) + '.';
+    ba.root.dataset.level = level;
+    // Na tela principal o aviso aparece logo abaixo do total; no leitor, abaixo da barra de cima.
+    ba.root.style.top = scanner.open ? '' : Math.round(el.top.getBoundingClientRect().bottom + 6) + 'px';
+    ba.root.hidden = false;
+    requestAnimationFrame(function () { ba.root.classList.add('show'); });
+    clearTimeout(baTimer); baTimer = setTimeout(hideBudgetAlert, 5000);
+    alertTone(level);
+    if (!reduceMotion) {
+      [el.tag, el.scanTotal].forEach(function (n) { n.classList.remove('alarm'); void n.offsetWidth; n.classList.add('alarm'); });
+    }
+  }
+  function hideBudgetAlert() {
+    clearTimeout(baTimer);
+    ba.root.classList.remove('show');
+    setTimeout(function () { if (!ba.root.classList.contains('show')) ba.root.hidden = true; }, 220);
+  }
+  ba.root.addEventListener('click', hideBudgetAlert);
+  [el.tag, el.scanTotal].forEach(function (n) {
+    n.addEventListener('animationend', function (e) { if (e.animationName === 'bump' || e.animationName === 'alarm') n.classList.remove('bump', 'alarm'); });
+  });
 
   function renderCart(flashId) {
     var ol = el.lines, has = trip.cart.length > 0;
@@ -193,8 +243,8 @@
     el.rStore.textContent = settings.store || 'Informar mercado';
   }
 
-  function renderAll(flashId, bump) {
-    renderTotals(bump); renderCart(flashId); renderHead();
+  function renderAll(flashId, bump, alert) {
+    renderTotals(bump, alert); renderCart(flashId); renderHead();
     if (flashId && !scanner.open) window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
   }
   function renderStorageWarn() { el.storageWarn.hidden = storageOk; }
@@ -241,9 +291,10 @@
   /* ---------------- toast ---------------- */
   var tt = { root: $('#toast'), msg: $('#toastMsg'), undo: $('#toastUndo') };
   var toastTimer = 0, toastUndo = null;
-  function toast(msg, undo) {
+  function toast(msg, undo, label) {
     clearTimeout(toastTimer);
     tt.msg.textContent = msg; toastUndo = undo || null; tt.undo.hidden = !undo;
+    tt.undo.textContent = label || 'Desfazer';
     tt.root.hidden = false;
     requestAnimationFrame(function () { tt.root.classList.add('show'); });
     toastTimer = setTimeout(hideToast, undo ? 6000 : 3200);
@@ -282,61 +333,163 @@
       o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + 0.13);
     } catch (e) {}
   }
+  // Aviso do orçamento: vibra e toca notas descendo, mais longas quanto mais perto do limite.
+  function alertTone(level) {
+    var pattern = level === 'over' ? [180, 90, 180, 90, 260] : level === 'close' ? [120, 80, 120] : [90];
+    try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) {}
+    if (!settings.beep || !actx) return;
+    try {
+      if (actx.state === 'suspended') actx.resume();
+      var notes = level === 'over' ? [880, 660, 440] : level === 'close' ? [880, 660] : [740];
+      notes.forEach(function (f, i) {
+        var t = actx.currentTime + i * 0.17, o = actx.createOscillator(), g = actx.createGain();
+        o.type = 'triangle'; o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.09, t + 0.015);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+        o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + 0.16);
+      });
+    } catch (e) {}
+  }
 
   /* ---------------- barcode decoding ---------------- */
-  var nativeDet = null;
-  (function () {
+  // Motores: ZXing-C++ em WebAssembly (Android e iPhone) e, quando existe, o leitor nativo do Android.
+  // O ZXing antigo em JavaScript só é carregado se o WebAssembly falhar.
+  var FORMATS_WASM = ['EAN13', 'EAN8', 'UPCA', 'UPCE', 'ITF14'];
+  var FORMATS_NATIVE = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf'];
+  var dec = { wasm: null, wasmState: 'idle', wasmReady: null, native: null, js: null, jsState: 'idle' };
+
+  (function initNative() {
     try {
       if (!('BarcodeDetector' in window)) return;
-      var want = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'itf'];
       window.BarcodeDetector.getSupportedFormats().then(function (sup) {
-        var f = want.filter(function (x) { return sup.indexOf(x) >= 0; });
-        if (f.indexOf('ean_13') >= 0) nativeDet = new window.BarcodeDetector({ formats: f });
+        var f = FORMATS_NATIVE.filter(function (x) { return sup.indexOf(x) >= 0; });
+        if (f.indexOf('ean_13') >= 0) dec.native = new window.BarcodeDetector({ formats: f });
       }, function () {});
     } catch (e) {}
   })();
 
+  function initWasm() {
+    if (dec.wasmReady) return dec.wasmReady;
+    var Z = window.ZXingWASM;
+    if (!Z || !Z.prepareZXingModule || typeof WebAssembly !== 'object') {
+      dec.wasmState = 'failed'; loadJsEngine();
+      return (dec.wasmReady = Promise.resolve(false));
+    }
+    dec.wasmState = 'loading';
+    var wasmUrl = new URL('vendor/zxing_reader-3.1.5.wasm', document.baseURI).href;
+    dec.wasmReady = Promise.resolve().then(function () {
+      return Z.prepareZXingModule({
+        overrides: { locateFile: function (path, prefix) { return /\.wasm$/.test(path) ? wasmUrl : prefix + path; } },
+        fireImmediately: true
+      });
+    }).then(function () { dec.wasm = Z; dec.wasmState = 'ready'; return true; },
+      function () { dec.wasmState = 'failed'; loadJsEngine(); return false; });
+    return dec.wasmReady;
+  }
+  function loadJsEngine() {
+    if (dec.jsState !== 'idle') return;
+    dec.jsState = 'loading';
+    var s = document.createElement('script');
+    s.src = 'vendor/zxing-library-0.21.3.min.js';
+    s.onload = function () { dec.js = window.ZXing && window.ZXing.MultiFormatReader ? window.ZXing : null; dec.jsState = dec.js ? 'ready' : 'failed'; };
+    s.onerror = function () { dec.jsState = 'failed'; };
+    document.head.appendChild(s);
+  }
+  function anyEngine() { return !!(dec.wasm || dec.native || dec.js); }
+  function engineName() {
+    return [dec.native ? 'nativo' : '', dec.wasm ? 'zxing-cpp' : '', !dec.wasm && dec.js ? 'zxing-js' : ''].filter(Boolean).join(' + ') || 'carregando';
+  }
+
+  function fmtKey(f) { return String(f || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+  // UPC-E (8 dígitos) vira UPC-A (12), que é como o produto aparece nos catálogos.
+  function upceToUpca(t) {
+    if (!/^[01]\d{7}$/.test(t)) return t;
+    var ns = t[0], d = t.slice(1, 7), ck = t[7], last = d[5], body;
+    if (last <= '2') body = d[0] + d[1] + last + '0000' + d[2] + d[3] + d[4];
+    else if (last === '3') body = d[0] + d[1] + d[2] + '00000' + d[3] + d[4];
+    else if (last === '4') body = d[0] + d[1] + d[2] + d[3] + '00000' + d[4];
+    else body = d.slice(0, 5) + '0000' + last;
+    return ns + body + ck;
+  }
   function acceptCode(text, fmt) {
-    var t = String(text || '').trim();
-    if (!t) return null;
-    if (fmt === 'itf') return /^\d{14}$/.test(t) && gtinValid(t) ? t : null;
-    if (fmt === 'ean_13' || fmt === 'ean_8' || fmt === 'upc_a' || fmt === 'upc_e') return /^\d{6,14}$/.test(t) ? t : null;
-    if (fmt === 'code_128') return t.length >= 4 && t.length <= 48 ? t : null;
+    var t = String(text || '').trim(), f = fmtKey(fmt);
+    if (f === 'upce') t = upceToUpca(t);
+    if (!/^\d{8,14}$/.test(t)) return null;
+    if (f === 'itf' || f === 'itf14') return t.length === 14 && gtinValid(t) ? t : null;
+    if (f === 'ean13' || f === 'ean8' || f === 'upca' || f === 'upce') return gtinValid(t) ? t : null;
     return null;
   }
   function pickNative(list) {
-    var order = ['ean_13', 'upc_a', 'ean_8', 'upc_e', 'itf', 'code_128'];
+    var order = ['ean_13', 'upc_a', 'ean_8', 'upc_e', 'itf'];
     list = (list || []).slice().sort(function (a, b) { return order.indexOf(a.format) - order.indexOf(b.format); });
-    for (var i = 0; i < list.length; i++) { var ok = acceptCode(list[i].rawValue, list[i].format); if (ok) return ok; }
+    for (var i = 0; i < list.length; i++) { var ok = acceptCode(list[i].rawValue, list[i].format); if (ok) return { code: ok, strong: false, by: 'nativo' }; }
     return null;
   }
 
-  var readers = {};
-  function zxReader(Z, hard) {
-    var k = hard ? 'hard' : 'fast';
-    if (readers[k]) return readers[k];
-    var F = Z.BarcodeFormat, hints = new Map();
-    hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.ITF]);
-    if (hard) hints.set(Z.DecodeHintType.TRY_HARDER, true);
-    var r = new Z.MultiFormatReader(); r.setHints(hints);
-    return (readers[k] = r);
+  function wasmRead(img, extra) {
+    if (!dec.wasm) return Promise.resolve(null);
+    var opts = { formats: FORMATS_WASM, maxNumberOfSymbols: 1, tryInvert: false, tryRotate: false, tryDownscale: true, tryHarder: false };
+    for (var k in extra) opts[k] = extra[k];
+    return dec.wasm.readBarcodes(img, opts).then(function (res) {
+      for (var i = 0; i < (res || []).length; i++) {
+        var r = res[i];
+        if (r.isValid === false) continue;
+        var ok = acceptCode(r.text, r.format);
+        if (ok) return { code: ok, strong: (r.lineCount || 0) >= 5, by: 'zxing-cpp' };
+      }
+      return null;
+    }, function () { return null; });
   }
-  function zxDecode(Z, reader, canvas, onlyBin) {
-    var w = canvas.width, h = canvas.height;
-    var px = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
-    var lum = new Uint8ClampedArray(w * h);
+
+  var jsReaders = {};
+  function jsRead(img) {
+    var Z = dec.js;
+    if (!Z) return null;
+    var reader = jsReaders.r;
+    if (!reader) {
+      var F = Z.BarcodeFormat, hints = new Map();
+      hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.ITF]);
+      hints.set(Z.DecodeHintType.TRY_HARDER, true);
+      reader = jsReaders.r = new Z.MultiFormatReader(); reader.setHints(hints);
+    }
+    var w = img.width, h = img.height, px = img.data, lum = new Uint8ClampedArray(w * h);
     for (var i = 0, j = 0; i < lum.length; i++, j += 4) lum[i] = (px[j] * 77 + px[j + 1] * 150 + px[j + 2] * 29) >> 8;
-    var src = new Z.RGBLuminanceSource(lum, w, h);
-    var bins = onlyBin ? [onlyBin] : [Z.HybridBinarizer, Z.GlobalHistogramBinarizer];
-    for (var k = 0; k < bins.length; k++) {
+    var src = new Z.RGBLuminanceSource(lum, w, h), bins = [Z.HybridBinarizer, Z.GlobalHistogramBinarizer];
+    for (var b = 0; b < bins.length; b++) {
       try {
-        var r = reader.decodeWithState(new Z.BinaryBitmap(new bins[k](src)));
-        var ok = acceptCode(r.getText(), String(Z.BarcodeFormat[r.getBarcodeFormat()] || '').toLowerCase());
-        if (ok) return ok;
+        var r = reader.decodeWithState(new Z.BinaryBitmap(new bins[b](src)));
+        var ok = acceptCode(r.getText(), Z.BarcodeFormat[r.getBarcodeFormat()]);
+        if (ok) return { code: ok, strong: false, by: 'zxing-js' };
       } catch (e) { /* nada nesta tentativa */ }
       try { reader.reset(); } catch (e) {}
     }
     return null;
+  }
+
+  // Reforço para código desfocado ou pequeno: tons de cinza, média de 2 linhas (tira ruído sem
+  // borrar as barras, que são verticais) e realce de contraste só na horizontal. up = 2 dobra a largura.
+  function barsBoost(img, up, K, R) {
+    var src = img.data, w = img.width, h = img.height, h2 = h >> 1, W = w * up;
+    var out = new Uint8ClampedArray(W * h2 * 4), row = new Float32Array(w), acc = new Float64Array(w + 1), x, X;
+    for (var y = 0; y < h2; y++) {
+      var a = 2 * y * w * 4, b = a + w * 4;
+      for (x = 0; x < w; x++) {
+        var i = a + x * 4, j = b + x * 4;
+        row[x] = (src[i] * 77 + src[i + 1] * 150 + src[i + 2] * 29 + src[j] * 77 + src[j + 1] * 150 + src[j + 2] * 29) / 512;
+      }
+      acc[0] = 0; for (x = 0; x < w; x++) acc[x + 1] = acc[x] + row[x];
+      for (X = 0; X < W; X++) {
+        var fx = up === 1 ? X : (X + 0.5) / up - 0.5, x0 = fx <= 0 ? 0 : Math.floor(fx), t = fx - x0;
+        if (x0 >= w - 1) { x0 = w - 1; t = 0; }
+        var v = t ? row[x0] * (1 - t) + row[x0 + 1] * t : row[x0];
+        var c = Math.round(fx), lo = c - R < 0 ? 0 : c - R, hi = c + R + 1 > w ? w : c + R + 1;
+        var g = v + K * (v - (acc[hi] - acc[lo]) / (hi - lo)), o = (y * W + X) * 4;
+        g = g < 0 ? 0 : g > 255 ? 255 : g;
+        out[o] = out[o + 1] = out[o + 2] = g; out[o + 3] = 255;
+      }
+    }
+    return new ImageData(out, W, h2);
   }
   function pause() { return new Promise(function (r) { setTimeout(r, 0); }); }
 
@@ -371,16 +524,23 @@
     g.drawImage(img.src, cx, cy, cw, ch, -sw / 2, -sh / 2, sw, sh);
     return c;
   }
+  function canvasData(c) { return c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, c.width, c.height); }
+
+  // Foto parada: várias tentativas, da mais barata para a mais cara.
   function findBarcode(img, isStale) {
-    var tryNative = nativeDet ? nativeDet.detect(img.src).then(pickNative, function () { return null; }) : Promise.resolve(null);
-    return tryNative.then(function (hit) {
-      if (hit) return hit;
-      var Z = window.ZXing;
-      if (!Z || !Z.MultiFormatReader) return null;
-      var reader = zxReader(Z, true);
+    var tryNative = dec.native ? dec.native.detect(img.src).then(pickNative, function () { return null; }) : Promise.resolve(null);
+    return Promise.all([tryNative, initWasm()]).then(function (r) {
+      if (r[0]) return r[0].code;
       var plan = [
-        { max: 1280 }, { max: 1280, rot: 90 }, { max: 1920 }, { max: 1920, rot: 90 },
-        { max: 1400, crop: 0.5 }, { max: 1400, crop: 0.5, rot: 90 }, { max: 1280, rot: 25 }, { max: 1280, rot: -25 }
+        { max: 1600, o: { tryHarder: true, tryRotate: true } },
+        { max: 1600, boost: 'reforco' },
+        { max: 1600, crop: 0.5, o: { tryHarder: true, tryRotate: true } },
+        { max: 1600, boost: 'nitido' },
+        { max: 1100, crop: 0.5, boost: 'ampliada' },
+        { max: 1600, rot: 90, boost: 'reforco' },
+        { max: 1600, boost: 'forte' },
+        { max: 2400, o: { tryHarder: true, tryRotate: true } },
+        { max: 1400, rot: 20 }, { max: 1400, rot: -20 }
       ];
       var i = 0;
       function step() {
@@ -388,19 +548,16 @@
         var p = plan[i++];
         return pause().then(function () {
           if (isStale()) return null;
-          return zxDecode(Z, reader, drawTo(img, p)) || step();
+          var data = canvasData(drawTo(img, p));
+          if (!dec.wasm) { var h = jsRead(data); return h ? h.code : step(); }
+          var bb = p.boost && BOOST[p.boost], input = bb ? barsBoost(data, bb[0], bb[1], bb[2]) : data;
+          return wasmRead(input, p.o || { tryHarder: true }).then(function (h) { return h ? h.code : step(); });
         });
       }
       return step();
     });
   }
-  function toJpeg(img, max) {
-    return new Promise(function (resolve) {
-      var c = drawTo(img, { max: max });
-      if (!c.toBlob) { resolve(null); return; }
-      c.toBlob(function (b) { resolve(b); }, 'image/jpeg', 0.86);
-    });
-  }
+
 
   /* ---------------- name and price lookups ---------------- */
   function fetchJson(url, opts, ms, outer) {
@@ -472,13 +629,12 @@
     if (!url) return Promise.resolve(null);
     return fetchJson(url, { credentials: 'omit', mode: 'cors' }, 7000).then(normalizeRemote, function () { return null; });
   }
-  function visionOn() { return validUrl((settings.visionUrl || '').trim()); }
 
   /* ---------------- item panel ---------------- */
   var ip = {
     root: $('#itemPanel'), title: $('#itemTitle'), close: $('#itemClose'), save: $('#itemSave'),
     thumbImg: $('#thumbImg'), thumbIcon: $('#thumbIcon'), status: $('#scanStatus'), statusText: $('#scanStatusText'), note: $('#scanNote'),
-    busyBar: $('#busyBar'), retake: $('#retake'), retakeText: $('#retakeText'), visionRead: $('#visionRead'),
+    busyBar: $('#busyBar'), retake: $('#retake'),
     priceLabel: $('#priceLabel'), unitSeg: $('#unitSeg'), unitUn: $('#unitUn'), unitKg: $('#unitKg'),
     price: $('#priceInput'), perKg: $('#perKg'), hint: $('#priceHint'), hintText: $('#priceHintText'), hintUse: $('#priceHintUse'), obs: $('#obs'),
     qtyField: $('#qtyField'), qty: $('#qtyInput'), minus: $('#qtyMinus'), plus: $('#qtyPlus'),
@@ -489,7 +645,7 @@
   var cam = $('#cam');
   var draft = null;
   // quem manda no preço quando duas fontes respondem
-  var RANK = { digitado: 6, balanca: 5, api: 4, foto: 3, carrinho: 2, memoria: 1 };
+  var RANK = { digitado: 6, balanca: 5, api: 4, carrinho: 2, memoria: 1 };
 
   function makeDraft(mode) {
     return {
@@ -499,9 +655,8 @@
       price: null, priceFrom: '', priceTouched: false, altPrice: null,
       unit: 'un', unitUser: false, qty: 1, grams: 1000,
       kind: 'idle', status: '', note: '', memNote: '', obs: '',
-      url: '', jpeg: null, photoTaken: false, token: 0,
-      lookingCatalog: false, lookingApi: false, catalogResult: '',
-      vision: 'idle', vctl: null
+      url: '', token: 0, priceFocused: false,
+      lookingCatalog: false, lookingApi: false, catalogResult: ''
     };
   }
   function setStatus(d, kind, status, note) { d.kind = kind; d.status = status; d.note = note || ''; }
@@ -545,10 +700,8 @@
     ip.status.dataset.kind = d.kind;
     ip.statusText.textContent = d.status;
     ip.note.textContent = d.note; ip.note.hidden = !d.note;
-    ip.busyBar.hidden = !(d.lookingCatalog || d.lookingApi || d.vision === 'reading');
-    ip.retake.hidden = d.mode === 'edit' || (!!d.code && !visionOn());
-    ip.retakeText.textContent = d.code ? 'Foto da etiqueta' : 'Foto do código';
-    ip.visionRead.hidden = !(visionOn() && d.jpeg && d.mode === 'new' && d.vision !== 'reading' && d.vision !== 'done');
+    ip.busyBar.hidden = !(d.lookingCatalog || d.lookingApi);
+    ip.retake.hidden = d.mode === 'edit' || !!d.code;
     var isKg = d.unit === 'kg';
     ip.unitSeg.hidden = !!d.scale || d.mode === 'more';
     ip.unitUn.setAttribute('aria-pressed', String(!isKg));
@@ -558,8 +711,8 @@
     ip.qtyField.hidden = isKg; ip.kgField.hidden = !isKg;
     var alt = d.altPrice && d.altPrice.cents !== d.price ? d.altPrice : null;
     ip.hint.hidden = !alt;
-    if (alt) ip.hintText.textContent = (alt.src === 'api' ? 'Sistema do mercado: ' : 'Na foto: ') + brl(alt.cents) + (isKg ? '/kg' : '');
-    ip.obs.hidden = !d.obs; ip.obs.textContent = d.obs ? 'Na etiqueta: ' + d.obs : '';
+    if (alt) ip.hintText.textContent = 'Sistema do mercado: ' + brl(alt.cents) + (isKg ? '/kg' : '');
+    ip.obs.hidden = !d.obs; ip.obs.textContent = d.obs || '';
     ip.remove.hidden = d.mode !== 'edit';
     renderCalc();
   }
@@ -578,7 +731,7 @@
       if (b) {
         var s = document.createElement('span');
         if (pt > b) { s.className = 'over'; s.textContent = ' · passa ' + brl(pt - b) + ' do orçamento'; }
-        else { s.className = pt / b >= 0.85 ? 'warn' : 'ok'; s.textContent = ' · faltam ' + brl(b - pt); }
+        else { var lv = budgetLevel(pt, b); s.className = lv === 'close' ? 'over' : lv === 'near' ? 'warn' : 'ok'; s.textContent = ' · faltam ' + brl(b - pt); }
         ip.after.appendChild(s);
       }
     }
@@ -589,7 +742,7 @@
 
   function discardDraft() {
     var d = draft; if (!d) return;
-    abortVision(d); d.token++;
+    d.token++;
     if (d.url) { var u = d.url; setTimeout(function () { URL.revokeObjectURL(u); }, 400); }
     draft = null;
   }
@@ -616,11 +769,10 @@
   }
 
   function finishNote(d) {
-    if (d.lookingCatalog || d.lookingApi || d.vision === 'reading') { d.note = 'Buscando nome e preço…'; return; }
+    if (d.lookingCatalog || d.lookingApi) { d.note = 'Buscando o nome do produto…'; return; }
     var alt = d.altPrice && d.altPrice.cents !== d.price ? d.altPrice : null, pf = d.priceFrom;
-    if (alt) d.note = (alt.src === 'api' ? 'O sistema do mercado' : 'A foto') + ' mostra outro valor. Veja qual vale.';
+    if (alt) d.note = 'O sistema do mercado mostra outro valor. Veja qual vale.';
     else if (pf === 'api') d.note = 'Preço do sistema do mercado.';
-    else if (pf === 'foto') d.note = 'Preço lido na foto. Confira com a etiqueta.';
     else if (pf === 'balanca') d.note = 'Valor tirado do código da balança. Confira com o impresso.';
     else if (pf === 'memoria') d.note = d.memNote || 'Preço salvo antes. Confira na etiqueta.';
     else if (pf === 'carrinho' || pf === 'digitado') { /* mantém */ }
@@ -636,7 +788,7 @@
       var res = applyCode(r.code, src);
       if (res === 'cart' || res === 'known') return;
     }
-    if (r.name && !d.nameTouched && (!d.name || d.nameFrom === 'catalogo' || (src === 'api' && d.nameFrom === 'foto'))) setName(r.name, src);
+    if (r.name && !d.nameTouched && (!d.name || d.nameFrom === 'catalogo')) setName(r.name, src);
     if (r.perKg && !d.unitUser && !d.scale && d.mode === 'new') { d.unit = 'kg'; if (!d.grams) d.grams = 1000; ip.grams.value = kg(d.grams); }
     if (r.cents) {
       var cur = d.priceTouched ? RANK.digitado : (RANK[d.priceFrom] || 0);
@@ -644,13 +796,6 @@
       else if (r.cents !== d.price) d.altPrice = { cents: r.cents, src: src };
     }
     if (r.obs) d.obs = r.obs;
-  }
-
-  function maybeVision(d) {
-    if (!visionOn() || !d.jpeg || d.vision !== 'idle' || d.mode !== 'new') return false;
-    if (d.price > 0 || d.lookingCatalog || d.lookingApi) return false;
-    if (!d.photoTaken && d.name) return false; // quadro da câmera sem etiqueta: só vale a pena para achar o nome
-    runVision(d); return true;
   }
 
   function startLookups(d, code, wantName, wantPrice) {
@@ -680,8 +825,13 @@
   }
   function afterLookup(d) {
     if (draft !== d) return;
-    if (maybeVision(d)) return;
     finishNote(d); renderDraft();
+  }
+  // Produto sem preço conhecido: o campo de preço já fica pronto para digitar.
+  function focusPriceIfMissing(d) {
+    if (draft !== d || d.priceFocused || d.price > 0 || d.mode === 'edit') return;
+    d.priceFocused = true;
+    try { ip.price.focus({ preventScroll: true }); } catch (e) {}
   }
 
   function applyCode(raw, from) {
@@ -727,68 +877,27 @@
   }
 
   function handlePhoto(d, file) {
-    var token = ++d.token, hadCode = !!d.code;
+    var token = ++d.token;
     var stale = function () { return draft !== d || d.token !== token; };
-    abortVision(d);
     if (d.url) URL.revokeObjectURL(d.url);
-    d.url = URL.createObjectURL(file); d.jpeg = null; d.photoTaken = true; d.vision = 'idle';
-    if (hadCode) d.note = 'Preparando a foto…';
-    else setStatus(d, 'busy', 'Procurando o código…', '');
+    d.url = URL.createObjectURL(file);
+    setStatus(d, 'busy', 'Procurando o código…', '');
     renderDraft();
     var img = null;
     loadImage(file).then(function (im) {
       img = im;
-      if (stale() || hadCode) return null;
-      return findBarcode(img, stale);
+      return stale() ? null : findBarcode(img, stale);
     }, function () { return null; }).then(function (hit) {
-      if (!img || stale()) return { hit: null, jpeg: null };
-      return toJpeg(img, 1280).then(function (j) { return { hit: hit, jpeg: j }; }, function () { return { hit: hit, jpeg: null }; });
-    }).then(function (res) {
       if (img) { img.close(); img = null; }
       if (stale()) return;
-      d.jpeg = res.jpeg;
-      if (!res.jpeg && !res.hit) {
-        setStatus(d, 'warn', 'Não consegui abrir a foto', 'Tente outra foto ou digite o preço.');
-        renderDraft(); return;
-      }
-      if (hadCode) { if (visionOn()) runVision(d); else { finishNote(d); renderDraft(); } return; }
-      if (res.hit) { beep(); applyCode(res.hit, 'foto'); return; }
-      setStatus(d, 'warn', window.ZXing || nativeDet ? 'Não achei o código de barras' : 'Leitor de código indisponível',
-        visionOn() ? 'Lendo a foto…' : 'Tente mais perto, sem reflexo, ou digite o código.');
+      if (hit) { beep(); applyCode(hit, 'foto'); focusPriceIfMissing(d); return; }
+      setStatus(d, 'warn', anyEngine() ? 'Não achei o código de barras' : 'Leitor de código indisponível',
+        'Tente mais perto, sem reflexo, ou digite o código.');
       renderDraft();
-      if (visionOn()) runVision(d);
     }).catch(function () {
       if (img) { img.close(); img = null; }
       if (stale()) return;
-      setStatus(d, 'warn', 'Não consegui ler a foto', 'Tente outra foto ou digite o preço.');
-      renderDraft();
-    });
-  }
-
-  function abortVision(d) {
-    if (d && d.vctl) { var c = d.vctl; d.vctl = null; try { c.abort(); } catch (e) {} }
-    if (d && d.vision === 'reading') d.vision = 'idle';
-  }
-  function runVision(d) {
-    if (!visionOn() || !d.jpeg) return;
-    abortVision(d);
-    var ctl = new AbortController();
-    d.vctl = ctl; d.vision = 'reading';
-    finishNote(d); renderDraft();
-    var fd = new FormData();
-    fd.append('foto', d.jpeg, 'foto.jpg');
-    if (d.code) fd.append('ean', d.code);
-    if (settings.store) fd.append('mercado', settings.store);
-    fetchJson(settings.visionUrl.trim(), { method: 'POST', body: fd, credentials: 'omit', mode: 'cors' }, 25000, ctl.signal).then(function (out) {
-      if (d.vctl !== ctl || draft !== d) return;
-      d.vctl = null; d.vision = 'done';
-      if (d.kind === 'warn') { d.kind = 'ok'; d.status = 'Lido pela foto'; }
-      applyRemote(d, normalizeRemote(out), 'foto');
-      finishNote(d); renderDraft();
-    }, function () {
-      if (d.vctl !== ctl || draft !== d) return;
-      d.vctl = null; d.vision = 'error';
-      d.note = 'Não consegui ler a foto agora. Digite o preço da etiqueta.';
+      setStatus(d, 'warn', 'Não consegui ler a foto', 'Tente outra foto ou digite o código.');
       renderDraft();
     });
   }
@@ -845,7 +954,7 @@
     saveTrip();
     if (!askedPersist) { askedPersist = true; checkPersist(true); }
     closePanel();
-    renderAll(flashId, true);
+    renderAll(flashId, true, true);
     toast(msg, function () { restore(before); });
   }
 
@@ -854,7 +963,7 @@
     if (!draft) return;
     var c = digitsToInt(ip.price.value, 7);
     draft.price = c; draft.priceTouched = true; draft.priceFrom = 'digitado';
-    if (draft.note && !draft.lookingApi && draft.vision !== 'reading' && draft.mode !== 'more') draft.note = '';
+    if (draft.note && !draft.lookingApi && draft.mode !== 'more') draft.note = '';
     ip.price.value = c == null ? '' : money(c); caretEnd(ip.price);
     renderDraft();
   });
@@ -901,6 +1010,8 @@
     draft.lastTyped = n;
     if (draft.mode === 'edit') { draft.code = n; return; }
     applyCode(n, 'digitado');
+    if (draft.price > 0) { try { ip.save.focus({ preventScroll: true }); } catch (e) {} }
+    else { draft.priceFocused = false; focusPriceIfMissing(draft); }
   }
   ip.code.addEventListener('input', function () { typedCode(false); });
   ip.code.addEventListener('change', function () { typedCode(true); });
@@ -910,7 +1021,6 @@
     draft.note = 'Valor trocado. Confira com a etiqueta.';
     renderDraft();
   });
-  ip.visionRead.addEventListener('click', function () { if (draft) runVision(draft); });
   ip.submit.addEventListener('click', commitDraft);
   ip.save.addEventListener('click', commitDraft);
   ip.close.addEventListener('click', function () { closePanel(); });
@@ -945,67 +1055,117 @@
 
   /* ---------------- live scanner ---------------- */
   var sc = {
-    root: $('#scanner'), video: $('#scanVideo'), frame: $('#scanFrame'), msg: $('#scanMsg'),
-    close: $('#scanClose'), torch: $('#scanTorch'), zoom: $('#scanZoom'), type: $('#scanType')
+    root: $('#scanner'), video: $('#scanVideo'), frame: $('#scanFrame'), msg: $('#scanMsg'), mid: $('#scanMid'), ring: $('#focusRing'),
+    close: $('#scanClose'), torch: $('#scanTorch'), zoom: $('#scanZoom'), cam: $('#scanCam'), camText: $('#scanCamText'), type: $('#scanType')
   };
   var scanner = {
-    open: false, paused: false, stream: null, track: null, timer: 0, session: 0, frame: 0,
-    last: '', lastAt: 0, hits: 0, cooldown: { code: '', until: 0 },
-    canvas: document.createElement('canvas'), torchOn: false, zoomCaps: null, zoomOn: false
+    open: false, paused: false, stream: null, track: null, caps: {}, timer: 0, session: 0, frame: 0, busy: false, busySince: 0, gap: 30,
+    votes: {}, votesAt: 0, cooldown: { code: '', until: 0 }, since: 0, seenAt: 0, hint: 0, seenT: 0,
+    torchOn: false, zooms: [], zoom: 1, cams: [], camId: '', switched: false, diag: '',
+    canvas: document.createElement('canvas'), ctx: null
   };
+  var MSG_AIM = 'Aponte para o código de barras';
   function setScanMsg(text, isErr) { sc.msg.textContent = text; sc.msg.classList.toggle('err', !!isErr); }
 
   function canLive() { return !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
   function openScanner() {
     primeAudio();
+    initWasm();
     if (!canLive()) { cam.click(); return; }
     scanner.open = true; scanner.paused = false;
     sc.root.hidden = false;
     document.documentElement.classList.add('scanning'); updateLock();
     renderTotals();
+    keepAwake(true);
     try { sc.close.focus({ preventScroll: true }); } catch (e) {}
     startCamera();
   }
   function closeScanner() {
     scanner.open = false; scanner.paused = false;
     stopCamera();
+    keepAwake(false);
     sc.root.hidden = true;
     document.documentElement.classList.remove('scanning'); updateLock();
     renderAll();
     try { $('#scanBtn').focus({ preventScroll: true }); } catch (e) {}
   }
+  function running() { return scanner.open && !scanner.paused && !!scanner.stream; }
   function pauseScanner() { scanner.paused = true; clearTimeout(scanner.timer); }
   function resumeScanner(code) {
     scanner.cooldown = { code: code || '', until: Date.now() + 3000 };
-    scanner.hits = 0; scanner.last = ''; scanner.paused = false;
-    sc.frame.classList.remove('hit');
+    scanner.votes = {}; scanner.paused = false;
+    scanner.since = Date.now(); scanner.hint = 0;
+    sc.frame.classList.remove('hit', 'seen');
     if (!scanner.stream) startCamera();
     else { setScanMsg('Aponte para o próximo código'); loop(); }
   }
   function stopCamera() {
     scanner.session++;
     clearTimeout(scanner.timer);
+    scanner.busy = false;
     if (scanner.stream) scanner.stream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
-    scanner.stream = null; scanner.track = null; scanner.torchOn = false; scanner.zoomOn = false;
-    sc.torch.setAttribute('aria-pressed', 'false'); sc.zoom.setAttribute('aria-pressed', 'false');
+    scanner.stream = null; scanner.track = null; scanner.torchOn = false;
+    sc.torch.setAttribute('aria-pressed', 'false');
     try { sc.video.srcObject = null; } catch (e) {}
   }
-  function startCamera() {
+
+  // Abre a câmera: a escolhida antes pela pessoa, senão a traseira padrão; no Android troca para a
+  // principal ("camera2 0", a que tem flash) se o navegador abriu outra lente.
+  function startCamera(forceId) {
     stopCamera();
-    var mine = scanner.session;
+    var mine = scanner.session, wantId = forceId || settings.cameraId || '';
     setScanMsg('Abrindo a câmera…');
-    navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
-    }).then(function (stream) {
-      if (mine !== scanner.session || !scanner.open || document.hidden) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
-      scanner.stream = stream; scanner.track = stream.getVideoTracks()[0] || null;
-      sc.video.srcObject = stream;
-      var p = sc.video.play(); if (p && p.catch) p.catch(function () {});
-      setupTrack();
-      setScanMsg('Aponte para o código de barras');
-      loop();
-    }, function (e) { if (mine === scanner.session) cameraError(e); });
+    var size = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
+    var tries = [];
+    if (wantId) tries.push(Object.assign({ deviceId: { exact: wantId } }, size));
+    tries.push(Object.assign({ facingMode: { ideal: 'environment' } }, size));
+    tries.push({ facingMode: { ideal: 'environment' } });
+    (function attempt(i) {
+      navigator.mediaDevices.getUserMedia({ audio: false, video: tries[i] }).then(function (stream) {
+        if (mine !== scanner.session || !scanner.open || document.hidden) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+        attachStream(stream, mine, !!tries[i].deviceId);
+      }, function (e) {
+        if (mine !== scanner.session) return;
+        var n = e && e.name;
+        if (i + 1 < tries.length && n !== 'NotAllowedError' && n !== 'SecurityError') {
+          if (i === 0 && wantId && wantId === settings.cameraId) { settings.cameraId = ''; saveSettings(); }
+          attempt(i + 1);
+        } else cameraError(e);
+      });
+    })(0);
+  }
+  function attachStream(stream, mine, chosen) {
+    scanner.stream = stream; scanner.track = stream.getVideoTracks()[0] || null;
+    sc.video.srcObject = stream;
+    var p = sc.video.play(); if (p && p.catch) p.catch(function () {});
+    var st = {};
+    try { st = scanner.track && scanner.track.getSettings ? scanner.track.getSettings() : {}; } catch (e) {}
+    scanner.camId = st.deviceId || '';
+    setupTrack();
+    initWasm().then(function () { if (mine === scanner.session) renderScanInfo(); });
+    scanner.since = Date.now(); scanner.hint = 0; scanner.frame = 0;
+    setScanMsg(MSG_AIM);
+    loop();
+    listCameras().then(function (cams) {
+      if (mine !== scanner.session) return;
+      scanner.cams = cams;
+      if (!chosen && !scanner.switched && !scanner.caps.torch) {
+        var main = cams.filter(function (c) { return /camera2 0\b/.test(c.label); })[0];
+        if (main && main.deviceId !== scanner.camId) { scanner.switched = true; settings.cameraId = main.deviceId; saveSettings(); startCamera(main.deviceId); return; }
+      }
+      renderScanInfo();
+    });
+  }
+  function camIndex(label) { var m = /camera2 (\d+)/i.exec(label || ''); return m ? +m[1] : 999; }
+  function listCameras() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return Promise.resolve([]);
+    return navigator.mediaDevices.enumerateDevices().then(function (list) {
+      var cams = list.filter(function (d) { return d.kind === 'videoinput' && d.deviceId; });
+      var back = cams.filter(function (d) { return /back|rear|traseir|environment/i.test(d.label) && !/front|frontal|facetime/i.test(d.label); });
+      if (!back.length) back = cams.filter(function (d) { return d.label && !/front|frontal|facetime|user/i.test(d.label); });
+      return back.map(function (d, i) { return { deviceId: d.deviceId, label: d.label, i: i }; })
+        .sort(function (a, b) { return (camIndex(a.label) - camIndex(b.label)) || (a.i - b.i); });
+    }, function () { return []; });
   }
   function cameraError(e) {
     var n = e && e.name;
@@ -1017,83 +1177,194 @@
   }
   function setupTrack() {
     var t = scanner.track, caps = {};
-    try { caps = t && t.getCapabilities ? t.getCapabilities() : {}; } catch (e) { caps = {}; }
+    try { caps = t && t.getCapabilities ? t.getCapabilities() || {} : {}; } catch (e) { caps = {}; }
+    scanner.caps = caps;
     sc.torch.hidden = !caps.torch;
-    scanner.zoomCaps = caps.zoom && caps.zoom.max >= 1.8 ? caps.zoom : null;
-    sc.zoom.hidden = !scanner.zoomCaps;
     if (t && caps.focusMode && caps.focusMode.indexOf('continuous') >= 0) {
       t.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
     }
+    // Zoom moderado deixa segurar o celular mais longe, onde a lente consegue focar.
+    var z = caps.zoom;
+    scanner.zooms = z && z.max >= 1.4 ? [1, 1.5, 2, 3].filter(function (v) { return v >= (z.min || 1) - 0.01 && v <= z.max + 0.01; }) : [];
+    sc.zoom.hidden = scanner.zooms.length < 2;
+    scanner.zoom = 1;
+    if (scanner.zooms.length > 1) {
+      var want = settings.zoom > 0 ? settings.zoom : (isIOS ? 2 : 1.5);
+      if (scanner.zooms.indexOf(want) < 0) want = scanner.zooms.filter(function (v) { return v <= want; }).pop() || 1;
+      setZoom(want);
+    }
+  }
+  function zoomText(v) { return String(v).replace('.', ',') + '×'; }
+  function setZoom(v) {
+    var t = scanner.track; if (!t) return;
+    t.applyConstraints({ advanced: [{ zoom: v }] }).then(function () {
+      if (scanner.track !== t) return;
+      scanner.zoom = v; sc.zoom.textContent = zoomText(v);
+      sc.zoom.setAttribute('aria-label', 'Zoom ' + zoomText(v) + '. Toque para trocar.');
+      renderScanInfo();
+    }, function () { sc.zoom.hidden = true; });
   }
   sc.torch.addEventListener('click', function () {
-    if (!scanner.track) return;
+    var t = scanner.track; if (!t) return;
     var on = !scanner.torchOn;
-    scanner.track.applyConstraints({ advanced: [{ torch: on }] }).then(function () {
+    t.applyConstraints({ advanced: [{ torch: on }] }).then(function () {
       scanner.torchOn = on; sc.torch.setAttribute('aria-pressed', String(on));
     }, function () { sc.torch.hidden = true; });
   });
   sc.zoom.addEventListener('click', function () {
-    if (!scanner.track || !scanner.zoomCaps) return;
-    var on = !scanner.zoomOn, z = scanner.zoomCaps;
-    scanner.track.applyConstraints({ advanced: [{ zoom: on ? Math.min(2, z.max) : (z.min || 1) }] }).then(function () {
-      scanner.zoomOn = on; sc.zoom.setAttribute('aria-pressed', String(on));
-    }, function () { sc.zoom.hidden = true; });
+    var z = scanner.zooms; if (z.length < 2) return;
+    var next = z[(z.indexOf(scanner.zoom) + 1) % z.length];
+    settings.zoom = next; saveSettings();
+    setZoom(next);
+  });
+  sc.cam.addEventListener('click', function () {
+    var cams = scanner.cams; if (cams.length < 2) return;
+    var i = cams.findIndex(function (c) { return c.deviceId === scanner.camId; });
+    var next = cams[(i + 1) % cams.length];
+    settings.cameraId = next.deviceId; saveSettings();
+    scanner.switched = true;
+    startCamera(next.deviceId);
+  });
+  function renderScanInfo() {
+    var cams = scanner.cams, i = cams.findIndex(function (c) { return c.deviceId === scanner.camId; });
+    sc.cam.hidden = cams.length < 2;
+    sc.camText.textContent = 'Lente ' + (i >= 0 ? i + 1 : 1) + '/' + cams.length;
+    var st = {};
+    try { st = scanner.track && scanner.track.getSettings ? scanner.track.getSettings() : {}; } catch (e) {}
+    scanner.diag = 'Leitor: ' + engineName() +
+      ' · câmera: ' + (i >= 0 && cams[i].label ? cams[i].label : 'traseira') +
+      (st.width ? ' · ' + st.width + '×' + st.height : '') +
+      (scanner.zoom > 1 ? ' · zoom ' + zoomText(scanner.zoom) : '') +
+      (scanner.caps.focusMode ? ' · foco: ' + scanner.caps.focusMode.join('/') : '');
+  }
+
+  // Toque na imagem: foca de novo naquele ponto (onde o navegador permite).
+  sc.mid.addEventListener('click', function (e) {
+    if (e.target.closest('button')) return;
+    var t = scanner.track; if (!t) return;
+    var r = sc.video.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    sc.ring.style.left = x + 'px'; sc.ring.style.top = y + 'px';
+    sc.ring.hidden = false; sc.ring.classList.remove('go'); void sc.ring.offsetWidth; sc.ring.classList.add('go');
+    clearTimeout(sc.ring._t); sc.ring._t = setTimeout(function () { sc.ring.hidden = true; }, 800);
+    var caps = scanner.caps || {}, modes = caps.focusMode || [], sup = {}, c = {};
+    try { sup = navigator.mediaDevices.getSupportedConstraints() || {}; } catch (x2) {}
+    if (sup.pointsOfInterest) c.pointsOfInterest = [{ x: Math.min(1, Math.max(0, x / r.width)), y: Math.min(1, Math.max(0, y / r.height)) }];
+    if (modes.indexOf('single-shot') >= 0) c.focusMode = 'single-shot';
+    else if (modes.indexOf('continuous') >= 0) c.focusMode = 'continuous';
+    if (!c.focusMode && !c.pointsOfInterest) return;
+    t.applyConstraints({ advanced: [c] }).then(function () {
+      if (c.focusMode !== 'single-shot') return;
+      setTimeout(function () { if (scanner.track === t) t.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {}); }, 1800);
+    }, function () {});
   });
 
-  // Região do vídeo, em pixels do vídeo: a moldura com folga ou, a cada 3 quadros, tudo o que aparece na tela
-  // (perdoa código maior que a moldura ou fora do centro).
+  // Região do vídeo, em pixels do vídeo. Estreita: a faixa da moldura (com folga), na largura toda da tela.
+  // Larga: tudo o que aparece na tela, para código grande, girado ou fora do centro.
   function cropRect(wide) {
     var v = sc.video, vw = v.videoWidth, vh = v.videoHeight;
     var vr = v.getBoundingClientRect(), fr = sc.frame.getBoundingClientRect();
     var s = Math.max(vr.width / vw, vr.height / vh);
     var offX = (vr.width - vw * s) / 2, offY = (vr.height - vh * s) / 2;
-    var x, y, w, h;
-    if (wide) {
-      x = -offX / s; y = -offY / s; w = vr.width / s; h = vr.height / s;
-    } else {
-      var mx = fr.width * 0.12, my = fr.height * 0.4;
-      x = (fr.left - vr.left - mx - offX) / s; y = (fr.top - vr.top - my - offY) / s;
-      w = (fr.width + 2 * mx) / s; h = (fr.height + 2 * my) / s;
-    }
+    var x = -offX / s, w = vr.width / s, y, h;
+    if (wide) { y = -offY / s; h = vr.height / s; }
+    else { var my = fr.height * 0.45; y = (fr.top - vr.top - my - offY) / s; h = (fr.height + 2 * my) / s; }
     x = Math.max(0, x); y = Math.max(0, y);
     w = Math.min(vw - x, w); h = Math.min(vh - y, h);
     if (!(w > 20 && h > 20)) return { x: 0, y: 0, w: vw, h: vh };
     return { x: x, y: y, w: w, h: h };
   }
-  function decodeVideo() {
+  function frameData(r, maxW) {
+    var c = scanner.canvas, k = Math.min(1, maxW / Math.max(r.w, r.h));
+    var w = Math.max(1, Math.round(r.w * k)), h = Math.max(1, Math.round(r.h * k));
+    if (c.width !== w) c.width = w;
+    if (c.height !== h) c.height = h;
+    var g = scanner.ctx || (scanner.ctx = c.getContext('2d', { willReadFrequently: true }));
+    g.drawImage(sc.video, r.x, r.y, r.w, r.h, 0, 0, w, h);
+    return g.getImageData(0, 0, w, h);
+  }
+
+  // Cada tentativa usa um jeito de ler; o leitor nativo do Android entra em quadros alternados.
+  // faixa: imagem crua da faixa da moldura · reforco/nitido/forte: realce contra desfoque (do leve ao forte)
+  // ampliada: dobra a largura para código pequeno · tela: a tela toda, aceitando código girado.
+  var PLAN = ['faixa', 'reforco', 'faixa', 'nitido', 'faixa', 'ampliada', 'faixa', 'forte', 'tela'];
+  var BOOST = { reforco: [1, 4, 3], nitido: [1, 8, 2], forte: [1, 8, 3], ampliada: [2, 1.5, 2] };
+  function tagged(p, by) { return p.then(function (h) { if (h) h.by = by; return h; }); }
+  function tick() {
     var v = sc.video;
     if (v.readyState < 2 || !v.videoWidth) return Promise.resolve(null);
-    var n = ++scanner.frame;
-    var r = cropRect(n % 3 === 0), c = scanner.canvas;
-    var k = Math.min(1, 960 / Math.max(r.w, r.h * 1.5));
-    c.width = Math.max(1, Math.round(r.w * k)); c.height = Math.max(1, Math.round(r.h * k));
-    c.getContext('2d', { willReadFrequently: true }).drawImage(v, r.x, r.y, r.w, r.h, 0, 0, c.width, c.height);
-    if (nativeDet) return nativeDet.detect(c).then(pickNative, function () { return null; });
-    var Z = window.ZXing;
-    if (!Z || !Z.MultiFormatReader) return Promise.resolve(null);
-    return Promise.resolve(zxDecode(Z, zxReader(Z, n % 4 === 0), c, n % 2 ? Z.HybridBinarizer : Z.GlobalHistogramBinarizer));
+    var n = scanner.frame++;
+    if (dec.native && (n % 2 === 0 || !(dec.wasm || dec.js))) {
+      return dec.native.detect(v).then(pickNative, function () { return null; });
+    }
+    var step = PLAN[(dec.native ? n >> 1 : n) % PLAN.length];
+    if (dec.wasm) {
+      if (step === 'tela') return tagged(wasmRead(frameData(cropRect(true), 1280), { tryHarder: true, tryRotate: true }), step);
+      var img = frameData(cropRect(false), 1280);
+      if (step === 'faixa') return tagged(wasmRead(img, null), step);
+      var b = BOOST[step];
+      return tagged(wasmRead(barsBoost(img, b[0], b[1], b[2]), { tryHarder: true, tryDownscale: false }), step);
+    }
+    if (dec.js) return Promise.resolve(jsRead(frameData(cropRect(step === 'tela'), 960)));
+    return Promise.resolve(null);
   }
   function loop() {
     clearTimeout(scanner.timer);
-    if (!scanner.open || scanner.paused || !scanner.stream) return;
-    scanner.timer = setTimeout(function () {
-      if (!scanner.open || scanner.paused || !scanner.stream) return;
-      decodeVideo().then(function (code) {
-        if (!scanner.open || scanner.paused) return;
-        if (code) onLiveCode(code); else loop();
-      }, function () { loop(); });
-    }, nativeDet ? 70 : 100);
+    if (!running()) return;
+    scanner.timer = setTimeout(runTick, scanner.gap);
   }
-  function onLiveCode(raw) {
-    var code = normCode(raw), now = Date.now();
-    if (scanner.cooldown.code && scanner.cooldown.code === code && now < scanner.cooldown.until) { loop(); return; }
-    if (code === scanner.last && now - scanner.lastAt < 1500) scanner.hits++; else scanner.hits = 1;
-    scanner.last = code; scanner.lastAt = now;
-    if (scanner.hits < (/^\d{8,14}$/.test(code) ? 2 : 3)) { loop(); return; }
-    scanner.hits = 0;
+  function runTick() {
+    if (!running()) return;
+    if (scanner.busy && performance.now() - scanner.busySince < 1500) { loop(); return; }
+    scanner.busy = true; scanner.busySince = performance.now();
+    var session = scanner.session, t0 = scanner.busySince;
+    tick().then(function (hit) {
+      scanner.busy = false;
+      if (session !== scanner.session || !running()) return;
+      scanner.gap = Math.max(12, 45 - (performance.now() - t0));
+      if (hit && onCandidate(hit)) return;
+      updateHint();
+      loop();
+    }, function () { scanner.busy = false; loop(); });
+  }
+  var SOLID = { nativo: 1, faixa: 1, tela: 1, 'zxing-js': 1 };
+  function onCandidate(hit) {
+    var code = normCode(hit.code), now = Date.now();
+    if (scanner.cooldown.code === code && now < scanner.cooldown.until) return false;
+    scanner.seenAt = now;
+    if (now - (scanner.votesAt || 0) > 1600) scanner.votes = {};
+    scanner.votesAt = now;
+    var votes = scanner.votes, v = votes[code] || (votes[code] = { n: 0, solid: 0, ways: {}, k: 0 });
+    var solid = !!SOLID[hit.by];
+    v.n++; if (solid) v.solid++;
+    if (!v.ways[hit.by]) { v.ways[hit.by] = 1; v.k++; }
+    var rival = Object.keys(votes).length > 1;
+    var ok = (solid && hit.strong) || v.solid >= 2 || (!rival && (v.k >= 2 || v.n >= 3));
+    if (!ok) {
+      sc.frame.classList.add('seen');
+      clearTimeout(scanner.seenT);
+      scanner.seenT = setTimeout(function () { sc.frame.classList.remove('seen'); }, 500);
+      if (scanner.hint !== -1) { scanner.hint = -1; setScanMsg('Segure firme…'); }
+      return false;
+    }
+    scanner.votes = {};
+    confirmCode(code, hit.by);
+    return true;
+  }
+  function updateHint() {
+    var idle = Date.now() - Math.max(scanner.since, scanner.seenAt);
+    var h = idle > 12000 ? 2 : idle > 6000 ? 1 : 0;
+    if (h === scanner.hint) return;
+    scanner.hint = h;
+    setScanMsg(h === 2
+      ? (scanner.caps.torch ? 'Pouca luz ou reflexo? Ligue a lanterna, toque na imagem para focar ou use Digitar código.'
+        : 'Reflexo ou pouca luz? Incline um pouco o produto, toque na imagem para focar ou use Digitar código.')
+      : h === 1 ? 'Segure a um palmo do produto (uns 15 a 20 cm), com o código dentro da moldura.' : MSG_AIM);
+  }
+  function confirmCode(code, by) {
     pauseScanner();
     beep();
-    sc.frame.classList.add('hit');
+    scanner.lastBy = by || '';
+    sc.frame.classList.remove('seen'); sc.frame.classList.add('hit');
     setScanMsg('Código lido');
     var shot = grabFrame();
     setTimeout(function () { sc.frame.classList.remove('hit'); }, 600);
@@ -1101,12 +1372,11 @@
     var d = draft;
     openPanel(ip.root, ip.title);
     applyCode(code, 'camera');
+    focusPriceIfMissing(d);
     shot.then(function (blob) {
-      if (draft !== d || !blob) return;
-      d.jpeg = blob;
-      if (!d.url) d.url = URL.createObjectURL(blob);
+      if (draft !== d || !blob || d.url) return;
+      d.url = URL.createObjectURL(blob);
       renderDraft();
-      if (maybeVision(d)) return;
     });
   }
   function grabFrame() {
@@ -1121,6 +1391,21 @@
       c.toBlob(function (b) { resolve(b); }, 'image/jpeg', 0.85);
     });
   }
+
+  // Tela acesa enquanto o leitor está aberto.
+  var wake = null;
+  function keepAwake(on) {
+    try {
+      if (on) {
+        if (wake || !navigator.wakeLock || document.hidden) return;
+        navigator.wakeLock.request('screen').then(function (w) {
+          if (!scanner.open) { w.release().catch(function () {}); return; }
+          wake = w; w.addEventListener('release', function () { if (wake === w) wake = null; });
+        }, function () {});
+      } else if (wake) { var w2 = wake; wake = null; w2.release().catch(function () {}); }
+    } catch (e) {}
+  }
+
   sc.close.addEventListener('click', closeScanner);
   sc.type.addEventListener('click', function () { pauseScanner(); openManual(true, ip.code); });
   $('#scanBtn').addEventListener('click', openScanner);
@@ -1128,6 +1413,7 @@
 
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) { if (scanner.stream) stopCamera(); return; }
+    if (scanner.open) keepAwake(true);
     if (scanner.open && !scanner.paused && !scanner.stream) startCamera();
     if (!trip.cart.length) renderHead();
   });
@@ -1136,14 +1422,14 @@
   /* ---------------- options ---------------- */
   var mp = {
     root: $('#menuPanel'), title: $('#menuTitle'), close: $('#menuClose'), install: $('#menuInstall'),
-    store: $('#storeInput'), budget: $('#budgetInput'), budgetClear: $('#budgetClear'),
+    store: $('#storeInput'), budget: $('#budgetInput'), budgetClear: $('#budgetClear'), budgetChips: $('#budgetChips'), diag: $('#diagInfo'),
     beep: $('#beepToggle'), catalog: $('#catalogToggle'),
     newTrip: $('#newTrip'), newConfirm: $('#newConfirm'), newSummary: $('#newSummary'), newYes: $('#newYes'), newNo: $('#newNo'),
     hist: $('#histList'), histEmpty: $('#histEmpty'), monthSum: $('#monthSum'),
     dataInfo: $('#dataInfo'), exportBtn: $('#exportBtn'), importBtn: $('#importBtn'), importFile: $('#importFile'),
     importConfirm: $('#importConfirm'), importSummary: $('#importSummary'), importYes: $('#importYes'), importNo: $('#importNo'),
     memClear: $('#memClear'), memConfirm: $('#memConfirm'), memYes: $('#memYes'), memNo: $('#memNo'),
-    priceUrl: $('#priceUrlInput'), visionUrl: $('#visionUrlInput'), integrationMsg: $('#integrationMsg')
+    priceUrl: $('#priceUrlInput'), integrationMsg: $('#integrationMsg')
   };
   function renderHistory() {
     mp.hist.textContent = '';
@@ -1167,12 +1453,13 @@
       plural(prices, 'preço salvo', 'preços salvos') + ' e ' + plural(history.length, 'compra', 'compras') + ' no histórico.' +
       (persisted ? ' O celular marcou estes dados como permanentes.' : '') + ' Versão ' + VERSION + '.';
     mp.memClear.hidden = !Object.keys(memory).length;
+    mp.diag.textContent = scanner.diag || ('Leitor: ' + engineName() + '. Abra o leitor uma vez para ver a câmera usada.');
   }
   function fillMenu() {
     mp.store.value = settings.store;
     mp.budget.value = settings.budget ? money(settings.budget) : '';
     mp.beep.checked = !!settings.beep; mp.catalog.checked = !!settings.catalog;
-    mp.priceUrl.value = settings.priceUrl; mp.visionUrl.value = settings.visionUrl;
+    mp.priceUrl.value = settings.priceUrl;
     mp.integrationMsg.hidden = true;
     mp.newConfirm.hidden = true; mp.memConfirm.hidden = true; mp.importConfirm.hidden = true;
     mp.newTrip.disabled = !trip.cart.length;
@@ -1192,6 +1479,10 @@
     saveSettings(); renderTotals();
   });
   mp.budgetClear.addEventListener('click', function () { settings.budget = null; mp.budget.value = ''; saveSettings(); renderTotals(); });
+  mp.budgetChips.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-v]'); if (!b) return;
+    settings.budget = parseInt(b.dataset.v, 10); mp.budget.value = money(settings.budget); saveSettings(); renderTotals();
+  });
   mp.beep.addEventListener('change', function () { settings.beep = mp.beep.checked; saveSettings(); if (settings.beep) { primeAudio(); beep(); } });
   mp.catalog.addEventListener('change', function () { settings.catalog = mp.catalog.checked; saveSettings(); });
   function saveUrl(input, key, label) {
@@ -1204,8 +1495,7 @@
     mp.integrationMsg.textContent = v ? label + ' ligada.' : label + ' desligada.';
     mp.integrationMsg.hidden = false;
   }
-  mp.priceUrl.addEventListener('change', function () { saveUrl(mp.priceUrl, 'priceUrl', 'Consulta de preço'); });
-  mp.visionUrl.addEventListener('change', function () { saveUrl(mp.visionUrl, 'visionUrl', 'Leitura de etiqueta'); });
+  mp.priceUrl.addEventListener('change', function () { saveUrl(mp.priceUrl, 'priceUrl', 'Tabela de preços'); });
 
   mp.newTrip.addEventListener('click', function () {
     mp.newSummary.textContent = 'Guardar ' + plural(trip.cart.length, 'item', 'itens') + ' (' + brl(cartTotal(trip.cart)) + ') no histórico e zerar o carrinho?';
@@ -1305,6 +1595,12 @@
   inst.later.addEventListener('click', function () { settings.installDismissed = true; saveSettings(); renderInstall(); });
 
   if ('serviceWorker' in navigator && window.isSecureContext) {
+    var swHadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (!swHadController) { swHadController = true; return; }
+      if (scanner.open || openPanelEl) toast('Versão nova do app pronta.', function () { location.reload(); }, 'Atualizar');
+      else location.reload();
+    });
     window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
   }
 

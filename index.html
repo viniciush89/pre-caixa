@@ -16,7 +16,7 @@
 <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="preload" href="fonts/sofia-sans-extra-condensed-latin-900-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="app.css?v=1.1.0">
 </head>
 <body>
 
@@ -28,7 +28,7 @@
       <button class="icon-btn" id="menuBtn" type="button" aria-label="Opções: mercado, orçamento, histórico e dados"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="2.1" fill="currentColor"/><circle cx="12" cy="12" r="2.1" fill="currentColor"/><circle cx="19" cy="12" r="2.1" fill="currentColor"/></svg></button>
     </div>
     <div class="tag" id="tag">
-      <div class="tag-head" aria-hidden="true"><span>Total no carrinho</span><span id="tagCount">0 itens</span></div>
+      <div class="tag-head" aria-hidden="true"><span id="tagLabel">Total no carrinho</span><span id="tagCount">0 itens</span></div>
       <div class="tag-price" aria-hidden="true"><span class="cur">R$</span><span class="int" id="tagInt">0</span><span class="dec" id="tagDec">,00</span></div>
       <span class="vh" id="tagSpoken" role="status">Total no carrinho: R$ 0,00</span>
     </div>
@@ -84,18 +84,20 @@
 
 <section class="scanner" id="scanner" role="dialog" aria-modal="true" aria-label="Leitor de código de barras" hidden>
   <video id="scanVideo" autoplay muted playsinline></video>
+  <i class="focus-ring" id="focusRing" hidden></i>
   <div class="scan-ui">
     <div class="scan-top">
       <button class="scan-btn round" id="scanClose" type="button" aria-label="Fechar o leitor e ver o carrinho"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       <div class="scan-total" id="scanTotal" aria-live="polite">R$ 0,00 · 0 itens</div>
     </div>
-    <div class="scan-mid">
+    <div class="scan-mid" id="scanMid">
       <div class="scan-frame" id="scanFrame"><i class="laser"></i></div>
       <p class="scan-msg" id="scanMsg">Abrindo a câmera…</p>
     </div>
     <div class="scan-bottom">
       <button class="scan-btn" id="scanTorch" type="button" aria-pressed="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3h8l-1.5 6h-5z"/><path d="M9.5 9h5v11a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1z"/><path d="M12 13v2.5"/></svg>Lanterna</button>
-      <button class="scan-btn" id="scanZoom" type="button" aria-pressed="false" hidden>2×</button>
+      <button class="scan-btn round wide" id="scanZoom" type="button" hidden>1×</button>
+      <button class="scan-btn" id="scanCam" type="button" aria-label="Trocar a lente da câmera" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.3l1.4-2h5.6l1.4 2h1.3A2.5 2.5 0 0 1 20 8.5v8a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/><path d="M9 11.5a3 3 0 0 1 5.2-2M15 13.5a3 3 0 0 1-5.2 2"/><path d="M14.4 7.6l-.2 1.9-1.9-.2M9.6 17.4l.2-1.9 1.9.2"/></svg><span id="scanCamText">Lente</span></button>
       <button class="scan-btn" id="scanType" type="button"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M6.5 9.5h.01M10.2 9.5h.01M13.8 9.5h.01M17.5 9.5h.01M6.5 13h.01M17.5 13h.01M9 15.2h6"/></svg>Digitar código</button>
       <label class="scan-btn" id="scanPhoto" for="cam" role="button" tabindex="0"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.3l1.4-2h5.6l1.4 2h1.3A2.5 2.5 0 0 1 20 8.5v8a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12.4" r="3.4"/></svg>Foto</label>
     </div>
@@ -117,8 +119,7 @@
         <div class="busy-bar" id="busyBar" hidden><i></i></div>
       </div>
       <div class="scan-actions">
-        <label class="chip-btn" id="retake" for="cam" role="button" tabindex="0"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.3l1.4-2h5.6l1.4 2h1.3A2.5 2.5 0 0 1 20 8.5v8a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12.4" r="3.4"/></svg><span id="retakeText">Foto da etiqueta</span></label>
-        <button class="chip-btn" id="visionRead" type="button" hidden>Ler preço na foto</button>
+        <label class="chip-btn" id="retake" for="cam" role="button" tabindex="0"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.3l1.4-2h5.6l1.4 2h1.3A2.5 2.5 0 0 1 20 8.5v8a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12.4" r="3.4"/></svg><span>Foto do código</span></label>
       </div>
     </div>
 
@@ -178,7 +179,8 @@
       <div class="field">
         <label for="budgetInput">Orçamento desta compra</label>
         <div class="money"><span class="pre" aria-hidden="true">R$</span><input id="budgetInput" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00"><button type="button" class="btn-mini ghost" id="budgetClear">Sem limite</button></div>
-        <p class="help">A barra do topo fica amarela perto do limite e vermelha quando passa.</p>
+        <div class="chips" id="budgetChips" aria-label="Valores rápidos"><button type="button" data-v="10000">R$ 100</button><button type="button" data-v="15000">R$ 150</button><button type="button" data-v="20000">R$ 200</button><button type="button" data-v="30000">R$ 300</button><button type="button" data-v="50000">R$ 500</button></div>
+        <p class="help">O total fica laranja aos 75% do orçamento, vermelho aos 90% e listrado quando passa. A cada mudança o celular vibra e avisa.</p>
       </div>
     </div>
     <div class="group">
@@ -203,6 +205,7 @@
     <div class="group">
       <h3>Seus dados</h3>
       <p class="help" id="dataInfo"></p>
+      <p class="help" id="diagInfo"></p>
       <div class="btn-pair"><button class="btn-wide" id="exportBtn" type="button">Exportar backup</button><button class="btn-wide" id="importBtn" type="button">Importar backup</button></div>
       <div class="confirm" id="importConfirm" hidden>
         <p id="importSummary"></p>
@@ -214,27 +217,23 @@
         <div class="btn-pair"><button class="btn-wide danger strong" id="memYes" type="button">Apagar</button><button class="btn-wide" id="memNo" type="button">Cancelar</button></div>
       </div>
     </div>
-    <div class="group">
-      <h3>Integrações</h3>
-      <p class="help">Opcional. Ligue o app ao sistema do mercado ou a um fluxo seu (n8n, por exemplo).</p>
+    <details class="group adv">
+      <summary>Avançado</summary>
       <div class="field">
-        <label for="priceUrlInput">Consulta de preço (URL)</label>
+        <label for="priceUrlInput">Tabela de preços do mercado (URL)</label>
         <input class="inp mono" id="priceUrlInput" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://…">
-        <p class="help">Para cada código lido, o app chama <code>GET URL?ean=CÓDIGO&amp;mercado=NOME</code> e espera <code>{"nome": "...", "preco": 9.49}</code>.</p>
-      </div>
-      <div class="field">
-        <label for="visionUrlInput">Leitura de etiqueta por foto (URL)</label>
-        <input class="inp mono" id="visionUrlInput" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://…">
-        <p class="help">Recebe a foto por <code>POST</code> (campo <code>foto</code>, mais <code>ean</code> e <code>mercado</code>) e devolve <code>{"nome", "preco", "preco_por_kg"}</code>.</p>
+        <p class="help">Só se o mercado oferecer uma consulta de preços. Para cada código lido, o app chama <code>GET URL?ean=CÓDIGO&amp;mercado=NOME</code> e espera <code>{"nome": "...", "preco": 9.49}</code>.</p>
       </div>
       <p class="help" id="integrationMsg" hidden></p>
-    </div>
+    </details>
   </div></div>
 </section>
 
+<div class="budget-alert" id="budgetAlert" role="alert" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 2.5 20h19z"/><path d="M12 10v4.5M12 17.2h.01"/></svg><p id="budgetAlertText"></p></div>
+
 <div class="toast" id="toast" hidden><p id="toastMsg" role="status"></p><button type="button" id="toastUndo" hidden>Desfazer</button></div>
 
-<script src="vendor/zxing-library-0.21.3.min.js"></script>
-<script src="app.js"></script>
+<script src="vendor/zxing-wasm-reader-3.1.5.js"></script>
+<script src="app.js?v=1.1.0"></script>
 </body>
 </html>

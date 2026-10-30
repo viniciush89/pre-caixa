@@ -1,13 +1,16 @@
 /* Pré-Caixa · service worker
    Guarda o app no celular para abrir sem sinal dentro do mercado.
-   Ao publicar uma versão nova, troque VERSION: o celular baixa os arquivos de novo. */
-var VERSION = 'pre-caixa-1.0.0';
+   Ao publicar uma versão nova, troque VERSION (e o ?v= no index.html): o celular baixa os arquivos de novo
+   e o app recarrega sozinho na versão nova. */
+var VERSION = 'pre-caixa-1.1.0';
 var SHELL = [
   './',
   './index.html',
-  './app.css',
-  './app.js',
+  './app.css?v=1.1.0',
+  './app.js?v=1.1.0',
   './manifest.webmanifest',
+  './vendor/zxing-wasm-reader-3.1.5.js',
+  './vendor/zxing_reader-3.1.5.wasm',
   './vendor/zxing-library-0.21.3.min.js',
   './fonts/sofia-sans-extra-condensed-latin-700-normal.woff2',
   './fonts/sofia-sans-extra-condensed-latin-800-normal.woff2',
@@ -25,6 +28,7 @@ var SHELL = [
   './icons/icon-512.png',
   './icons/maskable-512.png'
 ];
+var SHELL_PATHS = SHELL.map(function (u) { return new URL(u, self.location.href).pathname; });
 
 self.addEventListener('install', function (event) {
   event.waitUntil(
@@ -44,14 +48,13 @@ self.addEventListener('activate', function (event) {
 
 // Arquivos do próprio app: responde do celular na hora e atualiza em segundo plano.
 // Qualquer outra coisa (catálogo, integrações, outros caminhos) vai direto para a rede.
-var SHELL_URLS = SHELL.map(function (u) { return new URL(u, self.location.href).href; });
 self.addEventListener('fetch', function (event) {
   var req = event.request;
   if (req.method !== 'GET') return;
   var url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
   var isPage = req.mode === 'navigate';
-  if (!isPage && SHELL_URLS.indexOf(url.origin + url.pathname) < 0) return;
+  if (!isPage && SHELL_PATHS.indexOf(url.pathname) < 0) return;
   event.respondWith(
     caches.open(VERSION).then(function (cache) {
       var key = isPage ? './index.html' : req;
