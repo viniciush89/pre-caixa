@@ -16,6 +16,13 @@ Você aponta a câmera para o código de barras, confere preço e quantidade, e 
 - **Preço**:
   - você digita uma vez e o celular lembra na próxima compra;
   - etiqueta de balança (EAN-13 começando com `2`) já traz o total no código.
+- **Lista de compras**: você monta em casa (aceita "2 leite"); sugere os produtos que você mais compra. No mercado,
+  cada produto que entra no carrinho risca o item da lista sozinho (pelo código ou pelo nome), e o app mostra a
+  previsão de quanto a compra vai fechar com o que falta. Na compra nova, os itens já pegos saem da lista.
+- **Esse preço subiu?**: cada produto guarda o histórico de preços com data e mercado. Ao escanear, o app mostra a
+  última compra, se subiu ou baixou (em R$ e %) e o menor preço visto nos últimos 90 dias, inclusive em outro mercado.
+  No cupom, as linhas mostram ▲/▼ e o rodapé soma quanto ficou mais caro ou mais barato.
+- **Mercado em um toque**: Guanabara, Mundial e Supermarket aparecem como atalhos, junto dos mercados já usados.
 - **Orçamento com alerta de cor**: o total fica amarelo, laranja aos 75%, vermelho aos 90% e listrado quando passa. A cada mudança de faixa o celular vibra, toca um aviso e mostra quanto falta.
 - **Dados no celular**: carrinho, preços e histórico ficam no `localStorage` do aparelho. Backup em arquivo nas Opções.
 - **Sem sinal**: o service worker guarda o app, inclusive o leitor; depois da primeira abertura ele funciona offline.

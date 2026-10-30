@@ -16,7 +16,7 @@
 <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="preload" href="fonts/sofia-sans-extra-condensed-latin-900-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="app.css?v=1.1.0">
+<link rel="stylesheet" href="app.css?v=1.2.0">
 </head>
 <body>
 
@@ -45,10 +45,18 @@
     <div class="install-row"><button class="btn-mini" id="installBtn" type="button">Instalar</button><button class="btn-mini ghost" id="installLater" type="button">Agora não</button></div>
   </div>
   <p class="banner" id="storageWarn" hidden>Este navegador não está guardando os dados. Mantenha o app aberto até passar no caixa.</p>
+  <div class="tabs" role="tablist" aria-label="Ver carrinho ou lista">
+    <button type="button" role="tab" id="tabCart" aria-selected="true" aria-controls="cartView">Carrinho <b id="tabCartN">0</b></button>
+    <button type="button" role="tab" id="tabList" aria-selected="false" aria-controls="listView">Lista <b id="tabListN">0</b></button>
+  </div>
+
+  <div id="cartView" role="tabpanel" aria-labelledby="tabCart">
+  <button class="list-peek" id="listPeek" type="button" hidden><span id="listPeekText"></span><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
   <section class="receipt" aria-labelledby="rTitle">
     <div class="r-head">
       <h2 class="r-title" id="rTitle">Cupom de conferência</h2>
-      <button class="r-store" id="rStore" type="button">Informar mercado</button>
+      <button class="r-store" id="rStore" type="button" hidden>Informar mercado</button>
+      <div class="r-stores" id="rStores"><p>Em qual mercado você está?</p><div class="chips" id="rStoresChips"></div></div>
       <span class="r-date" id="rDate"></span>
     </div>
     <div class="r-cols" id="rCols" aria-hidden="true" hidden>
@@ -63,14 +71,38 @@
         <div class="line"><span class="seq">002</span><span class="desc">Banana prata</span><span class="calc">balança · 1 un x 6,37</span><span class="sub">6,37</span></div>
       </div>
       <p class="ghost-label">Exemplo · seus itens aparecem aqui</p>
-      <p class="r-help">Toque em <b>Escanear</b> e aponte a câmera para o código de barras. O nome do produto vem do catálogo e o preço que você confirmar fica salvo neste celular para a próxima vez.</p>
+      <p class="r-help">Toque em <b>Escanear</b> e aponte a câmera para o código de barras. O nome do produto vem do catálogo, e o preço que você confirmar fica salvo neste celular para a próxima vez.</p>
     </div>
     <div class="r-foot" id="rFoot" hidden>
       <div class="row"><span>Qtd. total de itens</span><span id="footCount">0</span></div>
       <div class="row total"><span>Valor total R$</span><span id="footTotal">0,00</span></div>
+      <div class="row delta up" id="footUp" hidden><span id="footUpL"></span><span id="footUpV"></span></div>
+      <div class="row delta down" id="footDown" hidden><span id="footDownL"></span><span id="footDownV"></span></div>
     </div>
     <p class="r-fine">Preço no caixa diferente da etiqueta? Vale o menor (Lei 10.962/2004, art. 5º)<br>Não é documento fiscal</p>
   </section>
+  </div>
+
+  <div id="listView" role="tabpanel" aria-labelledby="tabList" hidden>
+    <section class="notepad" aria-labelledby="listTitle">
+      <h2 class="np-title" id="listTitle">Lista de compras</h2>
+      <form class="np-add" id="listForm" autocomplete="off">
+        <label class="vh" for="listInput">Item para a lista</label>
+        <input class="inp" id="listInput" type="text" enterkeyhint="done" autocapitalize="sentences" maxlength="60" placeholder="Ex.: 2 leite, café, banana">
+        <button class="btn-mini" type="submit">Pôr na lista</button>
+      </form>
+      <div class="np-sugg" id="listSugg" hidden></div>
+      <ul class="np-items" id="listItems"></ul>
+      <p class="np-empty" id="listEmpty">Escreva o que precisa comprar. No mercado, cada produto escaneado é riscado da lista sozinho e você vê quanto a compra deve fechar.</p>
+      <div class="np-foot" id="listFoot" hidden>
+        <div class="row"><span>Já no carrinho</span><span id="lfCart"></span></div>
+        <div class="row"><span>Falta pegar</span><span id="lfPend"></span></div>
+        <div class="row total"><span>Previsão no caixa</span><span id="lfTotal"></span></div>
+        <p class="np-note" id="lfNote" hidden></p>
+        <button class="btn-mini ghost" id="listClearDone" type="button" hidden>Tirar os itens já pegos</button>
+      </div>
+    </section>
+  </div>
 </main>
 
 <nav class="dock" aria-label="Adicionar itens">
@@ -88,7 +120,7 @@
   <div class="scan-ui">
     <div class="scan-top">
       <button class="scan-btn round" id="scanClose" type="button" aria-label="Fechar o leitor e ver o carrinho"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-      <div class="scan-total" id="scanTotal" aria-live="polite">R$ 0,00 · 0 itens</div>
+      <div class="scan-right"><div class="scan-total" id="scanTotal" aria-live="polite">R$ 0,00 · 0 itens</div><div class="scan-list" id="scanList" hidden></div></div>
     </div>
     <div class="scan-mid" id="scanMid">
       <div class="scan-frame" id="scanFrame"><i class="laser"></i></div>
@@ -131,6 +163,11 @@
       <div class="money"><span class="pre" aria-hidden="true">R$</span><input id="priceInput" type="text" inputmode="numeric" autocomplete="off" placeholder="0,00"><span class="suf" id="perKg" hidden>/kg</span></div>
       <p class="hint" id="priceHint" hidden><span id="priceHintText"></span><button type="button" id="priceHintUse">Usar esse</button></p>
       <p class="obs" id="obs" hidden></p>
+      <div class="ph" id="priceHist" hidden>
+        <p class="ph-diff" id="phDiff" hidden></p>
+        <p class="ph-line" id="phLast"></p>
+        <p class="ph-line" id="phBest" hidden></p>
+      </div>
     </div>
 
     <div class="field" id="qtyField">
@@ -174,7 +211,8 @@
       <div class="field">
         <label for="storeInput">Mercado</label>
         <input class="inp" id="storeInput" type="text" autocomplete="off" maxlength="40" enterkeyhint="done" placeholder="Ex.: Guanabara Méier">
-        <p class="help">Aparece no cupom e junto dos preços que você salvar.</p>
+        <div class="chips" id="storeChips" aria-label="Mercados"></div>
+        <p class="help">Aparece no cupom e fica junto de cada preço salvo, para comparar entre mercados.</p>
       </div>
       <div class="field">
         <label for="budgetInput">Orçamento desta compra</label>
@@ -234,6 +272,6 @@
 <div class="toast" id="toast" hidden><p id="toastMsg" role="status"></p><button type="button" id="toastUndo" hidden>Desfazer</button></div>
 
 <script src="vendor/zxing-wasm-reader-3.1.5.js"></script>
-<script src="app.js?v=1.1.0"></script>
+<script src="app.js?v=1.2.0"></script>
 </body>
 </html>
