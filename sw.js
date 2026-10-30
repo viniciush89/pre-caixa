@@ -2,12 +2,12 @@
    Guarda o app no celular para abrir sem sinal dentro do mercado.
    Ao publicar uma versão nova, troque VERSION (e o ?v= no index.html): o celular baixa os arquivos de novo
    e o app recarrega sozinho na versão nova. */
-var VERSION = 'pre-caixa-1.5.0';
+var VERSION = 'pre-caixa-1.5.1';
 var SHELL = [
   './',
   './index.html',
-  './app.css?v=1.5.0',
-  './app.js?v=1.5.0',
+  './app.css?v=1.5.1',
+  './app.js?v=1.5.1',
   './manifest.webmanifest',
   './vendor/zxing-wasm-reader-3.1.5.js',
   './vendor/zxing_reader-3.1.5.wasm',

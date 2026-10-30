@@ -4,7 +4,7 @@
    - o que você mesmo ligar em Opções > Integrações. */
 (function () {
   'use strict';
-  var VERSION = '1.5.0';
+  var VERSION = '1.5.1';
   var $ = function (s) { return document.querySelector(s); };
   var reduceMotion = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 
@@ -252,15 +252,17 @@
   KINDS.frut.concat(KINDS.legum).forEach(function (p) { p.forEach(function (w) { INGR[w] = 1; }); });
   var HEADS = wordSet('suco, néctar, refresco, bebida, iogurte, sorvete, picolé, gelatina, geleia, bala, bolo, biscoito, bolacha, tempero, caldo, ' +
     'pão, macarrão, molho, creme, doce, extrato, polpa, farinha, amido, óleo, leite, água, chá, cereal, sopa, mistura, massa, ' +
-    'manteiga, margarina, azeite, vinagre');
+    'manteiga, margarina, azeite, vinagre, chocolate, bombom, pudim, pipoca, salgadinho, chips, sabor, aroma, lasanha, pizza, ' +
+    'empanado, nuggets, salsicha, linguiça, mortadela, ração, petisco, sachê, detergente, desinfetante, amaciante, limpador, ' +
+    'sabão, lava, alvejante, sabonete, shampoo, condicionador, hidratante');
   // Produto diferente com nome que começa pela palavra da lista: "leite" não é leite condensado; "água" não é água sanitária.
-  var COMPOUND = phrases('leite condensado, leite de coco, leite fermentado, água tônica, água sanitária, água oxigenada, água de coco, ' +
+  var COMPOUND = phrases('leite condensado, leite de coco, leite fermentado, leite com chocolate, água tônica, água sanitária, água oxigenada, água de coco, ' +
     'pão de queijo, pão de alho, pão de mel, batata palha, farinha de rosca');
   function hasAll(words, p) { return p.every(function (w) { return words.indexOf(w) >= 0; }); }
   function blocked(v, n) {
     for (var i = 0; i < COMPOUND.length; i++) {
       var c = COMPOUND[i];
-      if (hasAll(n, c) && !hasAll(v, c) && c.some(function (w) { return v.indexOf(w) >= 0; })) return true;
+      if (indexOfSeq(n, c) >= 0 && !hasAll(v, c) && c.some(function (w) { return v.indexOf(w) >= 0; })) return true;
     }
     // Ingrediente da lista que vem depois de um tipo de produto no nome ("Suco de Laranja", "Molho de Tomate").
     var at = -1;
@@ -543,9 +545,9 @@
   window.addEventListener('scroll', function () { el.top.classList.toggle('scrolled', window.scrollY > 4); }, { passive: true });
 
   /* ---------------- panels ---------------- */
-  var openPanelEl = null, returnFocus = null;
+  var openPanelEl = null, returnFocus = null, sheetOpen = false;
   function updateLock() {
-    document.documentElement.classList.toggle('locked', !!(openPanelEl || scanner.open));
+    document.documentElement.classList.toggle('locked', !!(openPanelEl || scanner.open || sheetOpen));
     document.documentElement.classList.toggle('panel-open', !!openPanelEl);
   }
   function openPanel(panel, focusEl) {
@@ -571,7 +573,8 @@
   }
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape') return;
-    if (openPanelEl) { e.preventDefault(); closePanel(); }
+    if (sheetOpen) { e.preventDefault(); closeSheet(); }
+    else if (openPanelEl) { e.preventDefault(); closePanel(); }
     else if (scanner.open) { e.preventDefault(); closeScanner(); }
   });
 
@@ -2065,13 +2068,22 @@
   }
 
   // Produtos do carrinho que ainda não riscaram nada da lista, os mais parecidos com o item primeiro.
+  // Palpites (no máximo 2): produto com palavra em comum com o item, ou produto sem nome.
   function freeLines(text) {
     var used = {};
     list.forEach(function (x) { if (x.lineId) used[x.lineId] = 1; });
-    return trip.cart.filter(function (l) { return !used[l.id] && taught(text, prodKey(l)) >= 0; })
+    var all = trip.cart.filter(function (l) { return !used[l.id] && taught(text, prodKey(l)) >= 0; })
       .map(function (l, i) { return { l: l, s: nameScore(text, l.name || ''), i: i }; })
-      .sort(function (a, b) { return (b.s - a.s) || (a.i - b.i); })
-      .slice(0, 3).map(function (x) { return x.l; });
+      .sort(function (a, b) { return (b.s - a.s) || (a.i - b.i); });
+    return {
+      all: all.map(function (x) { return x.l; }),
+      best: all.filter(function (x) { return x.s > 0 || !x.l.name; }).slice(0, 2).map(function (x) { return x.l; })
+    };
+  }
+  function pairItem(it, line) {
+    var wasManual = it.manual;
+    linkTo(it.id, line); it.manual = wasManual; saveList(); renderList();
+    toast('Pronto: “' + it.text + '” é ' + displayName(line) + '. Da próxima vez o app risca sozinho.');
   }
   function listRow(r) {
     var it = r.it, li = document.createElement('li');
@@ -2090,19 +2102,29 @@
     var txt = document.createElement('div');
     txt.className = 'np-text';
     txt.append(span('np-name', (it.qty > 1 ? it.qty + ' × ' : '') + it.text), span('np-sub', sub));
-    // Marcado à mão com produtos soltos no carrinho: "Foi um destes?" ensina o app.
-    var fl = r.done && it.manual && !r.line ? freeLines(it.text) : [];
-    if (fl.length) {
+    // Marcado à mão com produtos soltos no carrinho: "Foi um destes?" ensina o app. Até 2 palpites; o resto, na busca.
+    var fl = r.done && it.manual && !r.line ? freeLines(it.text) : null;
+    if (fl && fl.all.length) {
       var pair = document.createElement('div');
       pair.className = 'np-pair';
-      pair.appendChild(span('np-pair-label', 'Foi um destes?'));
-      fl.forEach(function (l) {
-        var pb = document.createElement('button');
-        pb.type = 'button'; pb.className = 'np-chip np-pair-btn'; pb.dataset.act = 'pair'; pb.dataset.line = l.id;
-        pb.textContent = displayName(l);
-        pb.setAttribute('aria-label', '“' + it.text + '” foi ' + displayName(l));
-        pair.appendChild(pb);
-      });
+      var more = document.createElement('button');
+      more.type = 'button'; more.dataset.act = 'pairmore';
+      if (fl.best.length) {
+        pair.appendChild(span('np-pair-label', 'Foi um destes?'));
+        fl.best.forEach(function (l) {
+          var pb = document.createElement('button');
+          pb.type = 'button'; pb.className = 'np-chip np-pair-btn'; pb.dataset.act = 'pair'; pb.dataset.line = l.id;
+          pb.textContent = displayName(l) + ' · ' + money(lineTotal(l));
+          pb.setAttribute('aria-label', '“' + it.text + '” foi ' + displayName(l));
+          pair.appendChild(pb);
+        });
+        more.className = 'np-chip np-pair-btn more'; more.textContent = 'Outro…';
+        more.setAttribute('aria-label', 'Escolher outro produto do carrinho para “' + it.text + '”');
+        if (fl.all.length > fl.best.length) pair.appendChild(more);
+      } else {
+        more.className = 'np-link'; more.textContent = 'Ligar a um produto do carrinho';
+        pair.appendChild(more);
+      }
       txt.appendChild(pair);
     }
     var del = document.createElement('button');
@@ -2201,10 +2223,16 @@
     }
     if (b.dataset.act === 'pair') {
       var pl = lineById(b.dataset.line);
-      if (!pl) return;
-      var wasManual = it.manual;
-      linkTo(it.id, pl); it.manual = wasManual; saveList(); renderList();
-      toast('Pronto: “' + it.text + '” é ' + displayName(pl) + '. Da próxima vez o app risca sozinho.');
+      if (pl) pairItem(it, pl);
+      return;
+    }
+    if (b.dataset.act === 'pairmore') {
+      var all = freeLines(it.text).all;
+      openSheet({
+        title: 'Qual produto do carrinho é “' + it.text + '”?', placeholder: 'Buscar entre ' + plural(all.length, 'produto', 'produtos') + ' do carrinho',
+        items: all.map(function (l) { return { id: l.id, label: displayName(l), sub: calcText(l).toLowerCase() + ' · ' + brl(lineTotal(l)) }; }),
+        onPick: function (lineId) { var l = lineId && lineById(lineId), cur = list.filter(function (x) { return x.id === it.id; })[0]; if (l && cur) pairItem(cur, l); }
+      });
       return;
     }
     var r = listRows().filter(function (x) { return x.it === it; })[0];
@@ -2649,8 +2677,68 @@
   window.addEventListener('online', function () { setTimeout(fillMissingNames, 1200); });
   document.addEventListener('visibilitychange', function () { if (!document.hidden) setTimeout(fillMissingNames, 600); });
 
+  /* ---------------- escolher numa lista grande: folha que sobe de baixo, com busca ---------------- */
+  var sh = { root: $('#pickSheet'), title: $('#pickTitle'), close: $('#pickClose'), search: $('#pickSearch'), list: $('#pickList'),
+    empty: $('#pickEmpty'), none: $('#pickNone'), opts: null, back: null };
+  // o: { title, placeholder, items: [{ id, label, sub, on }], noneLabel, onPick(id ou null) }
+  function openSheet(o) {
+    if (!tt.root.hidden) hideToast();
+    sh.opts = o; sh.back = document.activeElement;
+    sh.title.textContent = o.title;
+    sh.search.value = ''; sh.search.placeholder = o.placeholder || 'Buscar';
+    sh.search.hidden = o.items.length <= 6;
+    sh.none.hidden = !o.noneLabel; sh.none.textContent = o.noneLabel || '';
+    renderSheet();
+    sh.root.hidden = false; sheetOpen = true; updateLock();
+    sh.list.scrollTop = 0;
+    requestAnimationFrame(function () { sh.root.classList.add('open'); });
+    var first = sh.list.querySelector('[aria-pressed="true"]') || sh.list.querySelector('button') || sh.close;
+    try { first.focus({ preventScroll: true }); } catch (e) {}
+  }
+  function renderSheet() {
+    var o = sh.opts, q = sh.search.value.trim();
+    if (!o) return;
+    var items = q ? o.items.filter(function (x) { return typeMatches(q, x.label); }) : o.items;
+    sh.list.textContent = '';
+    items.forEach(function (x) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'pick-opt'; b.dataset.id = x.id;
+      b.setAttribute('aria-pressed', String(!!x.on));
+      b.appendChild(span('pick-label', x.label));
+      if (x.sub) b.appendChild(span('pick-sub', x.sub));
+      sh.list.appendChild(b);
+    });
+    sh.empty.hidden = items.length > 0;
+  }
+  function closeSheet() {
+    if (!sheetOpen) return;
+    sheetOpen = false; sh.opts = null;
+    sh.root.classList.remove('open');
+    setTimeout(function () { if (!sheetOpen) sh.root.hidden = true; }, reduceMotion ? 0 : 180);
+    updateLock();
+    var back = sh.back; sh.back = null;
+    if (back && document.contains(back)) { try { back.focus({ preventScroll: true }); } catch (e) {} }
+  }
+  function pickFromSheet(id) {
+    var f = sh.opts && sh.opts.onPick;
+    closeSheet();
+    if (f) f(id);
+  }
+  sh.search.addEventListener('input', renderSheet);
+  sh.search.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    var b = sh.list.querySelector('button[data-id]');
+    if (b && sh.list.querySelectorAll('button[data-id]').length === 1) pickFromSheet(b.dataset.id);
+  });
+  sh.list.addEventListener('click', function (e) { var b = e.target.closest('button[data-id]'); if (b) pickFromSheet(b.dataset.id); });
+  sh.none.addEventListener('click', function () { pickFromSheet(null); });
+  sh.close.addEventListener('click', closeSheet);
+  sh.root.addEventListener('click', function (e) { if (e.target === sh.root) closeSheet(); });
+
   /* ---------------- tela do item: qual item da lista este produto risca ---------------- */
-  var lp = { root: $('#listPick'), label: $('#listPickLabel'), chips: $('#listPickChips'), help: $('#listPickHelp') };
+  // Uma linha só: "Vai riscar da lista: leite · Trocar" ou "Não risca nada da lista · Escolher".
+  var lp = { root: $('#listPick'), box: $('#lpBox'), text: $('#lpText'), btn: $('#lpBtn') };
   function draftLine(d) { return { id: d.lineId || '', code: d.code, name: (d.name || '').trim(), scale: !!d.scale }; }
   // Itens que este produto pode riscar; ao editar, o item que ele já riscou também aparece.
   function pickItems(d) {
@@ -2664,39 +2752,46 @@
     if (d.listPick) return list.filter(function (x) { return x.id === d.listPick; })[0] || null;
     return findListItem(draftLine(d), pickItems(d));
   }
+  function itemLabel(it) { return (it.qty > 1 ? it.qty + ' × ' : '') + it.text; }
   function renderListPick() {
     var d = draft, items = d && (d.mode === 'new' || d.mode === 'edit') ? pickItems(d) : [];
     lp.root.hidden = !items.length;
     if (!items.length) return;
-    var sel = pickedItem(d), name = (d.name || '').trim();
-    var order = items.map(function (it, i) { return { it: it, s: it === sel ? 1e3 : nameScore(it.text, name), i: i }; })
-      .sort(function (a, b) { return (b.s - a.s) || (a.i - b.i); }).slice(0, 8);
-    lp.label.textContent = sel ? 'Vai riscar da lista' : 'Riscar algum item da lista?';
-    lp.chips.textContent = '';
-    order.forEach(function (o) {
-      var b = document.createElement('button');
-      b.type = 'button'; b.dataset.id = o.it.id;
-      b.textContent = (o.it.qty > 1 ? o.it.qty + ' × ' : '') + o.it.text;
-      b.setAttribute('aria-pressed', String(o.it === sel));
-      lp.chips.appendChild(b);
-    });
-    lp.help.hidden = !sel;
-    if (sel) lp.help.textContent = d.listCur && sel.id === d.listCur ? 'Este produto riscou este item. Toque nele para desfazer.'
-      : d.listPick ? 'Escolhido por você. Toque de novo para não riscar.'
-      : 'O app reconheceu. Toque em outro item para trocar, ou neste para não riscar.';
-  }
-  lp.chips.addEventListener('click', function (e) {
-    var b = e.target.closest('button[data-id]'), d = draft;
-    if (!b || !d) return;
     var sel = pickedItem(d);
-    if (sel && sel.id === b.dataset.id) d.listPick = 'none';
-    else {
-      d.listPick = b.dataset.id;
-      var it = list.filter(function (x) { return x.id === b.dataset.id; })[0];
-      // Produto sem nome: fica com o nome do item da lista (o catálogo ainda pode trocar por um nome melhor).
-      if (it && !(d.name || '').trim() && !d.nameTouched) { setName(it.text.charAt(0).toUpperCase() + it.text.slice(1), 'lista'); renderPriceHist(d); }
-    }
-    renderListPick();
+    lp.box.classList.toggle('on', !!sel);
+    lp.text.textContent = '';
+    if (sel) {
+      var b = document.createElement('b');
+      b.textContent = itemLabel(sel);
+      lp.text.append('Vai riscar da lista: ', b);
+    } else lp.text.textContent = 'Não risca nada da lista';
+    lp.btn.textContent = sel ? 'Trocar' : 'Escolher';
+    lp.btn.setAttribute('aria-label', sel ? 'Trocar o item da lista que este produto risca' : 'Escolher um item da lista para este produto riscar');
+  }
+  lp.btn.addEventListener('click', function () {
+    var d = draft;
+    if (!d) return;
+    var sel = pickedItem(d), name = (d.name || '').trim(), rows = listRows();
+    var sub = function (it) {
+      var r = rows.filter(function (x) { return x.it === it; })[0];
+      return r && r.got ? r.got + ' de ' + it.qty + ' no carrinho' : r && r.each != null ? '≈ ' + brl(r.each) : '';
+    };
+    var items = pickItems(d).map(function (it, i) { return { it: it, s: it === sel ? 1e3 : nameScore(it.text, name), i: i }; })
+      .sort(function (a, b) { return (b.s - a.s) || (a.i - b.i); })
+      .map(function (o) { return { id: o.it.id, label: itemLabel(o.it), sub: sub(o.it), on: o.it === sel }; });
+    openSheet({
+      title: 'Qual item da lista é este produto?', placeholder: 'Buscar entre ' + plural(items.length, 'item', 'itens') + ' da lista',
+      items: items, noneLabel: sel ? 'Não riscar nada da lista' : '',
+      onPick: function (id) {
+        if (draft !== d) return;
+        if (!id) { d.listPick = 'none'; renderListPick(); return; }
+        d.listPick = id;
+        var it = list.filter(function (x) { return x.id === id; })[0];
+        // Produto sem nome: fica com o nome do item da lista (o catálogo ainda pode trocar por um nome melhor).
+        if (it && !(d.name || '').trim() && !d.nameTouched) { setName(it.text.charAt(0).toUpperCase() + it.text.slice(1), 'lista'); renderPriceHist(d); }
+        renderListPick();
+      }
+    });
   });
 
   /* ---------------- nome de item sem código: escolher um já comprado ---------------- */

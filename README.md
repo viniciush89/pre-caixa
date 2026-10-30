@@ -34,9 +34,12 @@ Você aponta a câmera para o código de barras, confere preço e quantidade, e 
     creme dental) e tipos (refrigerante → Coca, Guaraná; queijo → mussarela; carne → patinho; frutas → banana);
   - não confunde produto feito do ingrediente: "leite" não é riscado por creme de leite ou leite condensado, "tomate"
     por molho de tomate, "laranja" por suco de laranja;
-  - na tela do item aparece "Vai riscar da lista: …" antes de adicionar, com os outros itens para trocar ou desmarcar;
-  - **aprende com você**: se não reconheceu, marque o item na lista e toque em "Foi um destes?" no produto certo, ou
-    escolha o item na tela do item. Se riscou errado, desmarque e toque em "Não era esse". Da próxima vez ele acerta.
+  - na tela do item aparece uma linha só, "Vai riscar da lista: …" com **Trocar** (ou "Não risca nada" com
+    **Escolher**). O botão abre uma folha com todos os itens, os mais parecidos primeiro, e busca quando a lista é
+    grande;
+  - **aprende com você**: se não reconheceu, marque o item na lista e toque no produto certo em "Foi um destes?" (até
+    2 palpites, e "Outro…" abre a busca no carrinho), ou escolha o item na tela do item. Se riscou errado, desmarque e
+    toque em "Não era esse". Da próxima vez ele acerta.
   - item posto na lista com o produto já no carrinho é riscado na hora.
 - **Lista pelo WhatsApp**:
   - **WhatsApp** manda o que falta comprar ("• 3 leite"); **Compartilhar** (ou **Copiar**) usa outro app.
