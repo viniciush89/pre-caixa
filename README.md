@@ -23,9 +23,23 @@ Você aponta a câmera para o código de barras, confere preço e quantidade, e 
 - **Preço**:
   - você digita uma vez e o celular lembra na próxima compra, inclusive item sem código (pão, frutas, frios), guardado pelo nome;
   - etiqueta de balança (EAN-13 começando com `2`) já traz o total no código.
-- **Lista de compras**: você monta em casa (aceita "2 leite"); sugere os produtos que você mais compra. No mercado,
-  cada produto que entra no carrinho risca o item da lista sozinho (pelo código ou pelo nome), e o app mostra a
-  previsão de quanto a compra vai fechar com o que falta. Na compra nova, os itens já pegos saem da lista.
+- **Lista de compras**: você monta em casa (aceita "2 leite", "leite x2", "café (2)"); sugere os produtos que você mais
+  compra. No mercado, cada produto que entra no carrinho risca o item da lista sozinho (pelo código ou pelo nome), e o
+  app mostra a previsão de quanto a compra vai fechar com o que falta. Na compra nova, os itens já pegos saem da lista.
+- **Lista pelo WhatsApp**:
+  - **WhatsApp** manda o que falta comprar ("• 3 leite"); **Compartilhar** (ou **Copiar**) usa outro app.
+  - **Colar lista** traz o texto copiado de uma conversa. Aceita um item por linha ou separado por vírgula, e limpa
+    marcadores, numeração, caixinhas `[ ]`, emojis e o negrito do WhatsApp. Item que já está na lista fica com a maior
+    quantidade, sem somar de novo; item já pego não volta.
+  - No Android, com o app instalado, o Pré-Caixa aparece no menu **Compartilhar**: segure a mensagem da lista no
+    WhatsApp, toque em Compartilhar e escolha o Pré-Caixa (`share_target` no manifesto).
+- **Conferir no caixa**: no fim do cupom, o botão vira o cupom numa lista de conferência. Toque em cada item quando o
+  caixa passar; se a tela do caixa mostrar outro preço, **Cobrou outro valor?** guarda o valor cobrado. Um cartão
+  preso no topo mostra quantos faltam, quanto falta conferir e quanto foi cobrado a mais ou a menos.
+- **Compras anteriores**: cada compra finalizada guarda os itens. Em Opções, toque numa compra para ver o cupom,
+  **Comprar de novo** (põe tudo na lista) ou apagar do histórico. Com o carrinho vazio, aparece a última compra.
+- **Nome que faltou**: produto escaneado sem internet fica com o código; quando a internet volta, o app procura o
+  nome sozinho e risca o item da lista, se bater.
 - **Esse preço subiu?**: cada produto guarda o histórico de preços com data e mercado. Ao escanear, o app mostra a
   última compra, se subiu ou baixou (em R$ e %) e o menor preço visto nos últimos 90 dias, inclusive em outro mercado.
   No cupom, as linhas mostram ▲/▼ e o rodapé soma quanto ficou mais caro ou mais barato.

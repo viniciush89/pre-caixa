@@ -4,7 +4,7 @@
    - o que você mesmo ligar em Opções > Integrações. */
 (function () {
   'use strict';
-  var VERSION = '1.3.0';
+  var VERSION = '1.4.0';
   var $ = function (s) { return document.querySelector(s); };
   var reduceMotion = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 
@@ -45,16 +45,30 @@
         code: typeof l.code === 'string' ? l.code : '', name: typeof l.name === 'string' ? l.name : '',
         unit: l.unit === 'kg' ? 'kg' : 'un', price: Math.round(l.price),
         qty: Math.max(1, Math.round(num(l.qty, 1))), grams: Math.max(1, Math.round(num(l.grams, 1000))),
-        scale: !!l.scale, at: num(l.at, Date.now())
+        scale: !!l.scale, at: num(l.at, Date.now()),
+        chk: !!l.chk, charged: num(l.charged, 0) > 0 ? Math.round(l.charged) : null, nameMiss: l.nameMiss ? 1 : 0
       };
     });
     var seq = Math.round(num(t.seq, 0));
     cart.forEach(function (l) { if (l.seq > seq) seq = l.seq; });
-    return { cart: cart, startedAt: num(t.startedAt, Date.now()), seq: seq, setup: !!t.setup };
+    return { cart: cart, startedAt: num(t.startedAt, Date.now()), seq: seq, setup: !!t.setup, check: !!t.check };
   }
   function cleanMemory(m) { return m && typeof m === 'object' && !Array.isArray(m) ? m : {}; }
+  // Itens de uma compra guardada: n nome, c código, u unidade, q quantidade, g gramas, p preço, t total da linha.
+  function cleanItems(a) {
+    if (!Array.isArray(a)) return null;
+    return a.filter(function (x) { return x && typeof x.n === 'string'; }).slice(0, 200).map(function (x) {
+      return { n: x.n.slice(0, 80), c: typeof x.c === 'string' ? x.c : '', u: x.u === 'kg' ? 'kg' : 'un', q: Math.max(1, Math.round(num(x.q, 1))),
+        g: Math.max(1, Math.round(num(x.g, 1000))), p: Math.max(0, Math.round(num(x.p, 0))), t: Math.max(0, Math.round(num(x.t, 0))) };
+    });
+  }
   function cleanHistory(h) {
-    return Array.isArray(h) ? h.filter(function (x) { return x && num(x.total, -1) >= 0 && num(x.at, 0) > 0; }).slice(0, 60) : [];
+    return Array.isArray(h) ? h.filter(function (x) { return x && num(x.total, -1) >= 0 && num(x.at, 0) > 0; }).slice(0, 60).map(function (x) {
+      var o = { at: x.at, end: num(x.end, x.at), store: typeof x.store === 'string' ? x.store : '', total: Math.round(x.total), lines: Math.max(0, Math.round(num(x.lines, 0))) };
+      var items = cleanItems(x.items);
+      if (items) o.items = items;
+      return o;
+    }) : [];
   }
   // Lista de compras: { id, text, qty, code, lineId (linha do carrinho que pegou o item), manual (marcado à mão) }
   function cleanList(a) {
@@ -307,29 +321,53 @@
     return { d: l.price - prev[0], total: Math.round((l.price - prev[0]) * units), prev: prev };
   }
 
+  // Na conferência do caixa, tocar na linha marca como conferida; "Cobrou outro valor?" abre o valor do caixa.
+  var ckEdit = '';
   function renderCart(flashId) {
-    var ol = el.lines, has = trip.cart.length > 0, ups = 0, upSum = 0, downs = 0, downSum = 0;
+    var ol = el.lines, has = trip.cart.length > 0, ups = 0, upSum = 0, downs = 0, downSum = 0, ck = !!trip.check && has;
     ol.textContent = '';
+    ol.classList.toggle('checking', ck);
     el.empty.hidden = has; el.cols.hidden = !has; el.foot.hidden = !has;
     fin.box.hidden = !has; if (!has) fin.confirm.hidden = true;
     trip.cart.forEach(function (l) {
       var li = document.createElement('li');
       var b = document.createElement('button');
       b.type = 'button'; b.className = 'line'; b.dataset.id = l.id;
-      var lt = lineTotal(l), dl = deltaFor(l), calc = span('calc', calcText(l));
+      var lt = lineTotal(l), dl = deltaFor(l), calc = span('calc', calcText(l)), lead;
       if (dl) {
-        calc.append(' ', span('delta ' + (dl.d > 0 ? 'up' : 'down'), (dl.d > 0 ? '▲ ' : '▼ ') + money(Math.abs(dl.d))));
+        if (!ck) calc.append(' ', span('delta ' + (dl.d > 0 ? 'up' : 'down'), (dl.d > 0 ? '▲ ' : '▼ ') + money(Math.abs(dl.d))));
         if (dl.d > 0) { ups++; upSum += dl.total; } else { downs++; downSum -= dl.total; }
       }
-      b.append(span('seq', String(l.seq).padStart(3, '0')), span('desc', displayName(l)), calc, span('sub', money(lt)));
-      b.setAttribute('aria-label', displayName(l) + ', ' + (l.unit === 'kg' ? kg(l.grams) + ' quilo a ' + brl(l.price) + ' o quilo' : l.qty + ' a ' + brl(l.price)) + ', total ' + brl(lt) +
-        (dl ? (dl.d > 0 ? ', subiu ' : ', baixou ') + brl(Math.abs(dl.d)) + ' desde a última compra' : '') + '. Toque para editar.');
+      var spoken = displayName(l) + ', ' + (l.unit === 'kg' ? kg(l.grams) + ' quilo a ' + brl(l.price) + ' o quilo' : l.qty + ' a ' + brl(l.price)) + ', total ' + brl(lt);
+      if (ck) {
+        lead = span('ck-box', ''); lead.innerHTML = CHECK_SVG;
+        var diff = l.charged != null && l.charged !== l.price;
+        if (diff) calc.append(' ', span('charged ' + (l.charged > l.price ? 'up' : 'down'), 'caixa ' + money(l.charged)));
+        b.setAttribute('aria-pressed', String(!!l.chk));
+        b.setAttribute('aria-label', spoken + (diff ? ', o caixa cobrou ' + brl(l.charged) : '') + '. ' + (l.chk ? 'Conferido.' : 'Toque quando o caixa passar este item.'));
+        li.className = 'ck-li';
+      } else {
+        lead = span('seq', String(l.seq).padStart(3, '0'));
+        b.setAttribute('aria-label', spoken + (dl ? (dl.d > 0 ? ', subiu ' : ', baixou ') + brl(Math.abs(dl.d)) + ' desde a última compra' : '') + '. Toque para editar.');
+      }
+      b.append(lead, span('desc', displayName(l)), calc, span('sub', money(lt)));
       if (l.id === flashId) b.classList.add('flash');
-      li.appendChild(b); ol.appendChild(li);
+      li.appendChild(b);
+      if (ck) {
+        var o = document.createElement('button');
+        o.type = 'button'; o.className = 'ck-other' + (l.charged != null && l.charged !== l.price ? ' set' : ''); o.dataset.id = l.id;
+        o.textContent = l.charged != null && l.charged !== l.price ? 'Caixa cobrou ' + brl(l.charged) + (l.unit === 'kg' ? '/kg' : '') + ' · mudar' : 'Cobrou outro valor?';
+        o.setAttribute('aria-expanded', String(ckEdit === l.id));
+        o.setAttribute('aria-label', 'Valor cobrado no caixa para ' + displayName(l));
+        li.appendChild(o);
+      }
+      ol.appendChild(li);
+      if (ck && ckEdit === l.id) ol.appendChild(chargedEditor(l));
     });
     el.footUp.hidden = !ups; el.footDown.hidden = !downs;
     if (ups) { el.footUpL.textContent = plural(ups, 'item mais caro', 'itens mais caros') + ' que da última vez'; el.footUpV.textContent = '+' + money(upSum); }
     if (downs) { el.footDownL.textContent = plural(downs, 'item mais barato', 'itens mais baratos') + ' que da última vez'; el.footDownV.textContent = '−' + money(downSum); }
+    renderCheck(); renderLast();
   }
 
   function renderHead() {
@@ -347,9 +385,40 @@
   }
   function renderStorageWarn() { el.storageWarn.hidden = storageOk; }
 
+  function lineById(id) { return trip.cart.filter(function (l) { return l.id === id; })[0] || null; }
+  function refocusLine(sel) {
+    var n = el.lines.querySelector(sel);
+    if (n) { try { n.focus({ preventScroll: true }); } catch (e) {} }
+  }
+  function saveCharged(l, cents) {
+    l.charged = cents && cents !== l.price ? cents : null;
+    l.chk = true; ckEdit = '';
+    saveTrip(); renderCart();
+    refocusLine('button.line[data-id="' + l.id + '"]');
+  }
   el.lines.addEventListener('click', function (e) {
-    var b = e.target.closest('button.line');
-    if (b) openEdit(b.dataset.id);
+    var b = e.target.closest('button');
+    if (!b || !el.lines.contains(b)) return;
+    var l = lineById(b.dataset.id);
+    if (!l) return;
+    if (b.classList.contains('ck-other')) {
+      ckEdit = ckEdit === l.id ? '' : l.id;
+      renderCart();
+      var inp = $('#chargedInput');
+      if (inp) { try { inp.focus(); } catch (x) {} }
+      else refocusLine('button.ck-other[data-id="' + l.id + '"]');
+      return;
+    }
+    if (b.classList.contains('ck-save')) { saveCharged(l, digitsToInt(($('#chargedInput') || {}).value, 7)); return; }
+    if (b.classList.contains('ck-same')) { saveCharged(l, null); return; }
+    if (!b.classList.contains('line')) return;
+    if (trip.check) {
+      l.chk = !l.chk; if (ckEdit === l.id) ckEdit = '';
+      saveTrip(); renderCart();
+      refocusLine('button.line[data-id="' + l.id + '"]');
+      return;
+    }
+    openEdit(l.id);
   });
   window.addEventListener('scroll', function () { el.top.classList.toggle('scrolled', window.scrollY > 4); }, { passive: true });
 
@@ -1731,9 +1800,15 @@
     return hit;
   }
 
+  // "2 leite", "2x leite", "3 un leite"; no fim, "leite x2", "leite 2x", "leite (2)". "1 kg de feijão" é peso, não quantidade.
   function parseListText(raw) {
-    var m = /^(\d{1,2})\s*(?:x|un\.?|unid\.?|unidades?)?\s+(.+)$/i.exec(raw);
-    return m ? { qty: Math.max(1, +m[1]), text: m[2].trim() } : { qty: 1, text: raw };
+    raw = String(raw || '').trim();
+    var m = /^(\d{1,2})\s*(?:x|×|un\.?|unid\.?|unidades?)?\s*\s(.+)$/i.exec(raw) || /^(\d{1,2})\s*(?:x|×)\s*(.+)$/i.exec(raw);
+    if (m && /^(kg|g|gr|grs|gramas?|quilos?|kilos?|l|lt|litros?|ml)\b/i.test(m[2])) m = null;
+    if (m) return { qty: Math.max(1, +m[1]), text: m[2].trim() };
+    var e = /^(.+?)\s+[x×]\s*(\d{1,2})$/i.exec(raw) || /^(.+?)\s+(\d{1,2})\s*[x×]$/i.exec(raw) || /^(.+?)\s*\((\d{1,2})\)$/.exec(raw);
+    if (e && +e[2] >= 1) return { qty: +e[2], text: e[1].replace(/[\s\-–:,]+$/, '') };
+    return { qty: 1, text: raw };
   }
   function addToList(text, code, qty) {
     text = text.trim().slice(0, 60);
@@ -1743,6 +1818,18 @@
     var it = { id: uid(), text: text, qty: qty, code: code || '', lineId: '', manual: false, at: Date.now() };
     list.push(it); saveList();
     return it;
+  }
+  // Lista colada ou "Comprar de novo": se o item já está na lista, fica a maior quantidade (não soma de novo);
+  // se já foi pego nesta compra, não entra de novo.
+  function ensureInList(text, code, qty) {
+    text = String(text || '').trim().slice(0, 60);
+    if (!text) return null;
+    var key = normText(text), rows = listRows();
+    var match = function (r) { return (code && r.it.code === code) || normText(r.it.text) === key; };
+    var same = rows.filter(function (r) { return !r.done && match(r); })[0];
+    if (same) { same.it.qty = Math.max(same.it.qty, Math.min(99, qty)); saveList(); return same.it; }
+    if (rows.some(function (r) { return r.done && match(r); })) return null;
+    return addToList(text, code, Math.min(99, qty));
   }
 
   // Sugestões: produtos já comprados, primeiro os mais frequentes.
@@ -1804,10 +1891,11 @@
     lv.cartView.hidden = tab !== 'cart';
     lv.listView.hidden = tab !== 'list';
     lv.peek.hidden = !(tab === 'cart' && sum.pending);
-    if (sum.pending) lv.peekText.textContent = (sum.pending === 1 ? 'Falta 1 item da lista' : 'Faltam ' + sum.pending + ' itens da lista') + ' · previsão no caixa ≈ ' + brl(sum.forecast);
+    if (sum.pending) lv.peekText.textContent = (sum.pending === 1 ? 'Falta 1 item da lista' : 'Faltam ' + sum.pending + ' itens da lista') + (sum.forecast > 0 ? ' · previsão no caixa ≈ ' + brl(sum.forecast) : '');
     lv.scan.hidden = !sum.pending;
     lv.scan.textContent = sum.pending === 1 ? 'Falta 1 da lista' : 'Faltam ' + sum.pending + ' da lista';
     if (tab !== 'list') return;
+    lx.wa.hidden = lx.share.hidden = !sum.pending;
     lv.items.textContent = '';
     var pend = rows.filter(function (r) { return !r.done; }), done = rows.filter(function (r) { return r.done; });
     pend.forEach(function (r) { lv.items.appendChild(listRow(r)); });
@@ -1882,6 +1970,88 @@
     saveList(); renderList();
     toast('Itens pegos tirados da lista.', function () { list = before; saveList(); renderList(); });
   });
+
+  /* ---------------- lista pelo WhatsApp: enviar, compartilhar e colar ---------------- */
+  var lx = {
+    wa: $('#listWa'), share: $('#listShare'), shareText: $('#listShareText'), paste: $('#listPaste'),
+    box: $('#pasteBox'), area: $('#pasteText'), add: $('#pasteAdd'), cancel: $('#pasteCancel')
+  };
+  lx.shareText.textContent = navigator.share ? 'Compartilhar' : 'Copiar';
+  function listShareText() {
+    var rows = listRows().filter(function (r) { return !r.done; });
+    return 'Lista de compras\n' + rows.map(function (r) { return '• ' + (r.rest > 1 ? r.rest + ' ' : '') + r.it.text; }).join('\n');
+  }
+  function openExternal(url) {
+    var a = document.createElement('a');
+    a.href = url; a.target = '_blank'; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  function copyText(text, okMsg) {
+    function fallback() {
+      var t = document.createElement('textarea');
+      t.value = text; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.top = '0'; t.style.opacity = '0';
+      document.body.appendChild(t); t.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      t.remove();
+      toast(ok ? okMsg : 'Não deu para copiar. Use o botão WhatsApp.');
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { toast(okMsg); }, fallback);
+    else fallback();
+  }
+  lx.wa.addEventListener('click', function () { openExternal('https://wa.me/?text=' + encodeURIComponent(listShareText())); });
+  lx.share.addEventListener('click', function () {
+    var text = listShareText();
+    if (navigator.share) { navigator.share({ text: text }).catch(function () {}); return; }
+    copyText(text, 'Lista copiada. Cole no WhatsApp ou onde quiser.');
+  });
+  // Uma linha por item (ou "leite, café, pão" numa linha só). Tira marcadores, emojis, caixinhas, numeração e negrito do WhatsApp.
+  function parsePasted(text) {
+    var parts = String(text || '').split(/\r?\n/);
+    if (parts.filter(function (p) { return p.trim(); }).length === 1) parts = parts.join(' ').split(/\s*[;,]\s*/);
+    return parts.map(function (x) {
+      return x.replace(/^[^\p{L}\p{N}\[]+/u, '').replace(/^\[\s*[xX✓✔]?\s*\]\s*/, '').replace(/^[^\p{L}\p{N}]+/u, '')
+        .replace(/^\d{1,2}[.)]\s+/, '').replace(/^(\d{1,2})\s*[-–:]\s+/, '$1 ')
+        .replace(/[^\p{L}\p{N})]+$/u, '').replace(/\s+/g, ' ').trim();
+    }).filter(function (x) {
+      return x && x.length <= 80 && /\p{L}/u.test(x) && !/^lista\b/i.test(x) && !/^previs[aã]o\b/i.test(x);
+    });
+  }
+  function showPaste(prefill) {
+    lx.box.hidden = false;
+    lx.area.value = prefill || '';
+    if (prefill) return;
+    var focusArea = function () { try { lx.area.focus(); } catch (e) {} };
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      navigator.clipboard.readText().then(function (t) { if (t && t.trim() && !lx.area.value) lx.area.value = t; else focusArea(); }, focusArea);
+    } else focusArea();
+  }
+  lx.paste.addEventListener('click', function () { if (lx.box.hidden) showPaste(''); else { try { lx.area.focus(); } catch (e) {} } });
+  lx.cancel.addEventListener('click', function () { lx.box.hidden = true; lx.area.value = ''; });
+  lx.add.addEventListener('click', function () {
+    var items = parsePasted(lx.area.value);
+    if (!items.length) { toast('Não achei itens. Cole um item por linha.'); try { lx.area.focus(); } catch (e) {} return; }
+    var before = JSON.parse(JSON.stringify(list)), n = 0;
+    items.forEach(function (x) { var p = parseListText(x); if (ensureInList(p.text, '', p.qty)) n++; });
+    trip.cart.forEach(linkList);
+    lx.box.hidden = true; lx.area.value = '';
+    renderList();
+    var skipped = items.length - n;
+    toast((n ? plural(n, 'item posto', 'itens postos') + ' na lista.' : 'Nada novo para a lista.') + (skipped ? ' ' + plural(skipped, 'já pego', 'já pegos') + '.' : ''),
+      n ? function () { list = cleanList(before); saveList(); renderList(); } : null);
+  });
+  // Lista enviada de outro app (WhatsApp → Compartilhar → Pré-Caixa, no Android com o app instalado).
+  function takeSharedText() {
+    var q;
+    try { q = new URLSearchParams(location.search); } catch (e) { return; }
+    var parts = [q.get('title'), q.get('text'), q.get('url')].filter(function (s) { return s && s.trim(); });
+    if (!parts.length) return;
+    try { window.history.replaceState(null, '', location.pathname); } catch (e) {}
+    tab = 'list'; settings.tab = 'list'; saveSettings();
+    renderAll();
+    showPaste(parts.join('\n'));
+    try { lx.box.scrollIntoView({ block: 'center' }); } catch (e) {}
+  }
 
   /* ---------------- mercados ---------------- */
   var DEFAULT_STORES = ['Guanabara', 'Mundial', 'Supermarket'];
@@ -2003,10 +2173,13 @@
     });
     saveList();
     if (had) {
-      history.unshift({ at: trip.startedAt, end: Date.now(), store: settings.store || '', total: cartTotal(trip.cart), lines: trip.cart.length });
+      history.unshift({ at: trip.startedAt, end: Date.now(), store: settings.store || '', total: cartTotal(trip.cart), lines: trip.cart.length,
+        items: trip.cart.slice().reverse().map(function (l) {
+          return { n: displayName(l), c: l.scale ? '' : l.code, u: l.unit, q: l.qty, g: l.grams, p: l.price, t: lineTotal(l) };
+        }) });
       history = history.slice(0, 60); saveHistory();
     }
-    trip.cart = []; trip.seq = 0; trip.startedAt = Date.now(); trip.setup = false; saveTrip();
+    trip.cart = []; trip.seq = 0; trip.startedAt = Date.now(); trip.setup = false; trip.check = false; saveTrip();
     settings.store = ''; saveSettings();
     fin.confirm.hidden = true;
     closePanel(); renderAll(null, true);
@@ -2028,6 +2201,196 @@
   });
   fin.no.addEventListener('click', function () { fin.confirm.hidden = true; });
   fin.yes.addEventListener('click', finishTrip);
+
+  /* ---------------- conferir no caixa ---------------- */
+  var ckc = {
+    card: $('#checkCard'), fill: $('#ckFill'), count: $('#ckCount'), rest: $('#ckRest'), over: $('#ckOver'), under: $('#ckUnder'), help: $('#ckHelp'),
+    exit: $('#checkExit'), btn: $('#checkBtn'), btnText: $('#checkBtnText')
+  };
+  function chargedEditor(l) {
+    var li = document.createElement('li');
+    li.className = 'ck-edit';
+    var lab = document.createElement('label');
+    lab.htmlFor = 'chargedInput';
+    lab.append(span('ck-name', displayName(l)), 'Quanto o caixa cobrou ' + (l.unit === 'kg' ? 'por kg' : 'por unidade') + '? No app: ' + brl(l.price) + (l.unit === 'kg' ? '/kg' : ''));
+    var wrap = document.createElement('div');
+    wrap.className = 'money';
+    var inp = document.createElement('input');
+    inp.id = 'chargedInput'; inp.type = 'text'; inp.inputMode = 'numeric'; inp.autocomplete = 'off'; inp.enterKeyHint = 'done';
+    inp.placeholder = money(l.price);
+    inp.value = l.charged != null ? money(l.charged) : '';
+    inp.addEventListener('input', function () {
+      var c = digitsToInt(inp.value, 7);
+      inp.value = c ? money(c) : ''; caretEnd(inp);
+    });
+    inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); saveCharged(l, digitsToInt(inp.value, 7)); } });
+    selectOnTap(inp, hasValue(inp));
+    var pre = span('pre', 'R$'); pre.setAttribute('aria-hidden', 'true');
+    wrap.append(pre, inp);
+    var row = document.createElement('div');
+    row.className = 'btn-pair';
+    var save = document.createElement('button');
+    save.type = 'button'; save.className = 'btn-wide strong ck-save'; save.dataset.id = l.id; save.textContent = 'Salvar';
+    var same = document.createElement('button');
+    same.type = 'button'; same.className = 'btn-wide ck-same'; same.dataset.id = l.id; same.textContent = 'Igual ao app';
+    row.append(save, same);
+    li.append(lab, wrap, row);
+    return li;
+  }
+  function renderCheck() {
+    var on = !!trip.check && trip.cart.length > 0;
+    ckc.card.hidden = !on;
+    ckc.btnText.textContent = on ? 'Sair da conferência' : 'Conferir no caixa';
+    ckc.btn.setAttribute('aria-pressed', String(on));
+    if (!on) return;
+    var n = trip.cart.length, done = 0, rest = 0, over = 0, overSum = 0, under = 0, underSum = 0;
+    trip.cart.forEach(function (l) {
+      if (l.chk) done++; else rest += lineTotal(l);
+      if (l.charged != null && l.charged !== l.price) {
+        var units = l.unit === 'kg' ? l.grams / 1000 : l.qty, d = Math.round((l.charged - l.price) * units);
+        if (d > 0) { over++; overSum += d; } else if (d < 0) { under++; underSum -= d; }
+      }
+    });
+    var total = cartTotal(trip.cart);
+    ckc.fill.style.width = (done / n * 100).toFixed(1) + '%';
+    ckc.count.textContent = done === n ? 'Tudo conferido' : done + ' de ' + n + ' conferidos';
+    ckc.rest.textContent = done === n
+      ? 'No app ' + brl(total) + (over || under ? ' · cobrado ' + brl(total + overSum - underSum) : ' · igual ao caixa')
+      : 'Falta conferir: ' + plural(n - done, 'item', 'itens') + ' · ' + brl(rest);
+    ckc.over.hidden = !over;
+    if (over) ckc.over.textContent = '+' + brl(overSum) + ' cobrado a mais em ' + plural(over, 'item', 'itens') + '. Se a etiqueta mostrava menos, peça a correção: vale o menor preço (Lei 10.962/2004).';
+    ckc.under.hidden = !under;
+    if (under) ckc.under.textContent = '−' + brl(underSum) + ' cobrado a menos em ' + plural(under, 'item', 'itens') + '.';
+    ckc.help.hidden = done > 0;
+    ckc.card.classList.toggle('editing', !!ckEdit);
+    ckc.card.dataset.state = over ? 'over' : done === n ? 'ok' : '';
+  }
+  function setCheck(on) {
+    trip.check = on; ckEdit = ''; saveTrip(); renderCart();
+    if (!on) { try { ckc.btn.focus({ preventScroll: true }); } catch (e) {} return; }
+    // Vai para o começo do cupom (o cartão é "grudento": mede onde ele fica sem grudar).
+    ckc.card.style.position = 'static';
+    var y = ckc.card.getBoundingClientRect().top + window.scrollY;
+    ckc.card.style.position = '';
+    window.scrollTo({ top: Math.max(0, y - 64), behavior: reduceMotion ? 'auto' : 'smooth' });
+  }
+  ckc.btn.addEventListener('click', function () { setCheck(!trip.check); });
+  ckc.exit.addEventListener('click', function () { setCheck(false); });
+
+  /* ---------------- compras anteriores ---------------- */
+  var tp = {
+    root: $('#tripPanel'), title: $('#tripTitle'), close: $('#tripClose'), meta: $('#tripMeta'), items: $('#tripItems'), total: $('#tripTotal'),
+    none: $('#tripNoItems'), again: $('#tripAgain'), againHelp: $('#tripAgainHelp'), del: $('#tripDelete'), delBox: $('#tripDelConfirm'),
+    delYes: $('#tripDelYes'), delNo: $('#tripDelNo'), i: -1, fromMenu: false
+  };
+  function openTrip(i, fromMenu) {
+    var h = history[i];
+    if (!h) return;
+    tp.i = i; tp.fromMenu = !!fromMenu;
+    tp.title.textContent = 'Compra de ' + ddmm(h.at);
+    tp.meta.textContent = (h.store || 'Mercado não informado') + ' · ' + dmy(h.at) + ' às ' + hm(h.at) + ' · ' + plural(h.lines || 0, 'item', 'itens');
+    tp.items.textContent = '';
+    var items = h.items || [];
+    items.forEach(function (x, k) {
+      var li = document.createElement('li');
+      li.className = 'line';
+      li.append(span('seq', String(k + 1).padStart(3, '0')), span('desc', x.n),
+        span('calc', x.u === 'kg' ? kg(x.g) + ' kg x ' + money(x.p) + '/kg' : x.q + ' un x ' + money(x.p)), span('sub', money(x.t)));
+      tp.items.appendChild(li);
+    });
+    tp.items.hidden = !items.length;
+    tp.none.hidden = !!items.length;
+    tp.again.hidden = tp.againHelp.hidden = !items.length;
+    tp.total.textContent = money(h.total);
+    tp.delBox.hidden = true;
+    openPanel(tp.root, tp.title);
+  }
+  function backToMenu(i) {
+    fillMenu();
+    var row = i >= 0 ? mp.hist.querySelector('button[data-i="' + i + '"]') : null;
+    openPanel(mp.root, row || mp.title);
+    if (row) { try { row.scrollIntoView({ block: 'center' }); } catch (e) {} }
+  }
+  function closeTrip() {
+    var back = tp.fromMenu, i = tp.i;
+    closePanel();
+    if (back) backToMenu(i);
+  }
+  // Põe os itens de uma compra na lista, com as mesmas quantidades (kg vira 1).
+  function buyAgain(h) {
+    var before = JSON.parse(JSON.stringify(list)), n = 0, skipped = 0;
+    (h.items || []).forEach(function (x) {
+      var code = x.c && !scaleOf(x.c) ? x.c : '';
+      var name = (code && memory[code] && memory[code].n) || x.n;
+      if (!name || name === 'Item de balança' || name === 'Item sem nome') return;
+      if (ensureInList(name, code || memKey('', name), x.u === 'kg' ? 1 : x.q)) n++; else skipped++;
+    });
+    trip.cart.forEach(linkList);
+    tab = 'list'; settings.tab = 'list'; saveSettings();
+    closePanel(); renderAll();
+    window.scrollTo({ top: 0 });
+    toast((n ? plural(n, 'item posto', 'itens postos') + ' na lista.' : 'Nada novo para a lista.') + (skipped ? ' ' + plural(skipped, 'já pego', 'já pegos') + '.' : ''),
+      n ? function () { list = cleanList(before); saveList(); renderList(); } : null);
+  }
+  tp.again.addEventListener('click', function () { var h = history[tp.i]; if (h) buyAgain(h); });
+  tp.close.addEventListener('click', closeTrip);
+  tp.del.addEventListener('click', function () { tp.delBox.hidden = false; try { tp.delYes.focus(); } catch (e) {} });
+  tp.delNo.addEventListener('click', function () { tp.delBox.hidden = true; try { tp.del.focus(); } catch (e) {} });
+  tp.delYes.addEventListener('click', function () {
+    var i = tp.i, gone = history.splice(i, 1)[0], back = tp.fromMenu;
+    if (!gone) return;
+    saveHistory(); closePanel(); renderAll();
+    if (back) backToMenu(-1);
+    toast('Compra apagada do histórico.', function () {
+      history.splice(i, 0, gone); saveHistory(); renderAll();
+      if (openPanelEl === mp.root) renderHistory();
+    });
+  });
+  // Carrinho vazio: atalho para a última compra.
+  var lastc = { box: $('#lastTrip'), open: $('#lastOpen'), text: $('#lastText'), again: $('#lastAgain') };
+  function renderLast() {
+    var h = history[0];
+    lastc.box.hidden = trip.cart.length > 0 || !h;
+    if (lastc.box.hidden) return;
+    lastc.text.textContent = ddmm(h.at) + ' · ' + (h.store || 'Mercado') + ' · ' + brl(h.total) + ' · ' + plural(h.lines || 0, 'item', 'itens');
+    lastc.again.hidden = !(h.items && h.items.length);
+  }
+  lastc.open.addEventListener('click', function () { openTrip(0, false); });
+  lastc.again.addEventListener('click', function () { if (history[0]) buyAgain(history[0]); });
+
+  /* ---------------- nome que faltou: procura de novo quando a internet volta ---------------- */
+  var filling = false;
+  function fillMissingNames() {
+    if (filling || !settings.catalog || navigator.onLine === false) return;
+    var todo = trip.cart.filter(function (l) { return l.code && !l.name && !l.scale && !l.nameMiss && !scaleOf(l.code); }).slice(0, 15);
+    if (!todo.length) return;
+    filling = true;
+    var found = 0, missed = 0;
+    function finish() {
+      filling = false;
+      if (!found && !missed) return;
+      saveTrip();
+      if (found) {
+        saveMemory(); renderAll();
+        toast(found === 1 ? 'Achei o nome de 1 produto que tinha ficado sem nome.' : 'Achei o nome de ' + found + ' produtos que tinham ficado sem nome.');
+      }
+    }
+    (function next(k) {
+      if (k >= todo.length) { finish(); return; }
+      var code = todo[k].code;
+      catalogName(code).then(function (n) {
+        if (n === null) { finish(); return; } // sem conexão: tenta na próxima vez
+        trip.cart.forEach(function (l) {
+          if (l.code !== code || l.name) return;
+          if (n) { l.name = n; found++; linkList(l); } else { l.nameMiss = 1; missed++; }
+        });
+        if (n && memory[code] && !memory[code].n) memory[code].n = n;
+        next(k + 1);
+      }, finish);
+    })(0);
+  }
+  window.addEventListener('online', function () { setTimeout(fillMissingNames, 1200); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) setTimeout(fillMissingNames, 600); });
 
   /* ---------------- nome de item sem código: escolher um já comprado ---------------- */
   var ns = $('#nameSugg');
@@ -2086,9 +2449,13 @@
   function renderHistory() {
     mp.hist.textContent = '';
     mp.histEmpty.hidden = history.length > 0;
-    history.slice(0, 20).forEach(function (h) {
-      var li = document.createElement('li');
-      li.append(span('h-when', dmy(h.at).slice(0, 5)), span('h-where', (h.store || 'Mercado') + ' · ' + plural(h.lines || 0, 'item', 'itens')), span('h-total', brl(h.total)));
+    history.slice(0, 20).forEach(function (h, i) {
+      var li = document.createElement('li'), b = document.createElement('button');
+      b.type = 'button'; b.className = 'h-row'; b.dataset.i = String(i);
+      b.append(span('h-when', ddmm(h.at)), span('h-where', (h.store || 'Mercado') + ' · ' + plural(h.lines || 0, 'item', 'itens')), span('h-total', brl(h.total)));
+      b.insertAdjacentHTML('beforeend', '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>');
+      b.setAttribute('aria-label', 'Compra de ' + dmy(h.at) + ', ' + (h.store || 'mercado não informado') + ', ' + plural(h.lines || 0, 'item', 'itens') + ', ' + brl(h.total) + '. Ver os itens.');
+      li.appendChild(b);
       mp.hist.appendChild(li);
     });
     var now = new Date(), m0 = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
@@ -2124,6 +2491,10 @@
   el.budget.addEventListener('click', function () { openMenu(mp.budget); });
   el.rStore.addEventListener('click', function () { openMenu(mp.store); });
   mp.close.addEventListener('click', function () { closePanel(); });
+  mp.hist.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-i]');
+    if (b) openTrip(parseInt(b.dataset.i, 10), true);
+  });
   mp.store.addEventListener('input', function () { setStore(mp.store.value); renderStoreChips(mp.storeChips, false); });
   mp.storeChips.addEventListener('click', function (e) {
     var b = e.target.closest('button[data-store]');
@@ -2255,5 +2626,7 @@
 
   /* ---------------- start ---------------- */
   renderAll(); renderStorageWarn(); renderInstall();
+  takeSharedText();
   checkPersist(standalone);
+  setTimeout(fillMissingNames, 1500);
 })();
